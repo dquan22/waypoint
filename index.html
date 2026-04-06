@@ -747,10 +747,7 @@ function switchTab(name,btn){
     else console.error('switchTab: tab content not found for', name);
     if(name==='map'){
       renderMapView();
-      // Leaflet needs the container to be visible before it can calculate tile positions
-      // Use multiple invalidateSize calls to handle slow renders
-      setTimeout(function(){if(leafletMap){leafletMap.invalidateSize(true);}},150);
-      setTimeout(function(){if(leafletMap){leafletMap.invalidateSize(true);}},400);
+      // Map is rebuilt fresh on each render via requestAnimationFrame in showLeafletMap
     }
     if(name==='places') renderPlaces();
   }catch(err){console.error('switchTab error:',err);}
@@ -1962,28 +1959,44 @@ async function geocodeStop(stop){
 
 
 // ── LEAFLET MAP HELPERS ──
-function getLeafletMap(){
-  const container = document.getElementById('leaflet-map');
-  if(!container) return null;
+function destroyLeafletMap(){
   if(leafletMap){
-    // Map already exists — clear all layers except the base tile layer
-    leafletMap.eachLayer(function(layer){
-      // Keep tile layers, remove markers and polylines
-      if(!(layer instanceof L.TileLayer)) leafletMap.removeLayer(layer);
-    });
-    return leafletMap;
+    leafletMap.remove();
+    leafletMap=null;
   }
-  // Create map fresh — container must be visible first
+  const container=document.getElementById('leaflet-map');
+  if(container){
+    // Wipe the container innerHTML so Leaflet starts clean
+    container.innerHTML='';
+    container.style.display='none';
+  }
+}
+
+function getLeafletMap(){
+  const container=document.getElementById('leaflet-map');
+  if(!container) return null;
+
+  // Always destroy and recreate — this is the only reliable way to avoid
+  // grey tiles caused by Leaflet calculating size before the container is visible
+  if(leafletMap){
+    leafletMap.remove();
+    leafletMap=null;
+    container.innerHTML='';
+  }
+
   container.style.display='block';
-  leafletMap = L.map('leaflet-map', {
-    zoomControl: true,
-    preferCanvas: true  // better performance for many markers
+
+  // Use a small delay to ensure the container is painted before Leaflet measures it
+  leafletMap=L.map('leaflet-map',{
+    zoomControl:true,
+    preferCanvas:false
   });
+
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
     attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-    maxZoom:19,
-    crossOrigin: true
+    maxZoom:19
   }).addTo(leafletMap);
+
   return leafletMap;
 }
 
@@ -1992,9 +2005,19 @@ function showLeafletMap(geocoded, colorHex, labelFn){
   const container = document.getElementById('leaflet-map');
   if(!geocoded.length || !container) return;
 
-  container.style.display='block';
   if(placeholder) placeholder.style.display='none';
+  container.style.display='block';
 
+  // Use requestAnimationFrame to wait for browser to paint the container
+  // before Leaflet initialises — this prevents the grey tile problem
+  requestAnimationFrame(function(){
+    requestAnimationFrame(function(){
+      _buildLeafletMap(geocoded, colorHex, labelFn, container, placeholder);
+    });
+  });
+}
+
+function _buildLeafletMap(geocoded, colorHex, labelFn, container, placeholder){
   const map = getLeafletMap();
   if(!map) return;
 
@@ -2030,16 +2053,12 @@ function showLeafletMap(geocoded, colorHex, labelFn){
     map.fitBounds(bounds, {padding:[40,40]});
   }
 
-  // Force Leaflet to recalculate size — use multiple calls with increasing delays
-  // because the container may still be transitioning into view
-  setTimeout(function(){ if(leafletMap) leafletMap.invalidateSize(true); }, 100);
-  setTimeout(function(){ if(leafletMap) leafletMap.invalidateSize(true); }, 350);
-  setTimeout(function(){ if(leafletMap) leafletMap.invalidateSize(true); }, 700);
+  // One final invalidateSize after a short delay as a safety net
+  setTimeout(function(){ if(leafletMap) leafletMap.invalidateSize(true); }, 250);
 }
 
 function hideLeafletMap(){
-  const container = document.getElementById('leaflet-map');
-  if(container) container.style.display='none';
+  destroyLeafletMap();
   const placeholder = document.getElementById('map-placeholder');
   if(placeholder) placeholder.style.display='flex';
 }
@@ -2075,11 +2094,19 @@ async function showMapForDay(di,day){
         {headers:{'User-Agent':'WaypointTravelApp/2.0'}});
       const data=await r.json();
       if(data.length){
-        const map=getLeafletMap();
-        if(map) map.setView([parseFloat(data[0].lat),parseFloat(data[0].lon)],12);
-        document.getElementById('leaflet-map').style.display='block';
-        document.getElementById('map-placeholder').style.display='none';
-        setTimeout(function(){if(leafletMap)leafletMap.invalidateSize();},100);
+        const fallbackLat=parseFloat(data[0].lat);
+        const fallbackLon=parseFloat(data[0].lon);
+        const container=document.getElementById('leaflet-map');
+        const ph=document.getElementById('map-placeholder');
+        if(ph) ph.style.display='none';
+        if(container) container.style.display='block';
+        requestAnimationFrame(function(){
+          requestAnimationFrame(function(){
+            const map=getLeafletMap();
+            if(map) map.setView([fallbackLat,fallbackLon],12);
+            setTimeout(function(){if(leafletMap)leafletMap.invalidateSize(true);},250);
+          });
+        });
         return;
       }
     }catch(e){}
