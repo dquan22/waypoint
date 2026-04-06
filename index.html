@@ -1668,7 +1668,7 @@ function renderMapDaysView(){
 
   if(activeMapDay===null){
     hideLeafletMap();
-    document.getElementById('map-placeholder-sub').textContent='Select a day to see stops on the map.';
+    (document.getElementById('map-placeholder-sub')||{}).textContent='Select a day to see stops on the map.';
     listEl.innerHTML='<p style="font-size:12px;color:var(--muted)">Select a day above.</p>';
     return;
   }
@@ -1678,7 +1678,7 @@ function renderMapDaysView(){
 
   if(!day.stops.length){
     hideLeafletMap();
-    document.getElementById('map-placeholder-sub').textContent='No stops on Day '+day.day+' yet.';
+    (document.getElementById('map-placeholder-sub')||{}).textContent='No stops on Day '+day.day+' yet.';
     listEl.innerHTML='<p style="font-size:12px;color:var(--muted)">No stops on this day.</p>';
     return;
   }
@@ -1730,7 +1730,7 @@ async function renderMapPlacesView(){
   if(!filtered.length){
     iframe.style.display='none';
     placeholder.style.display='flex';
-    document.getElementById('map-placeholder-sub').textContent = trip.places.length
+    (document.getElementById('map-placeholder-sub')||{}).textContent = trip.places.length
       ? 'No places match this filter.'
       : 'No places saved yet — add some in the Places tab.';
     listEl.innerHTML='<p style="font-size:12px;color:var(--muted)">'+(trip.places.length?'No places match this filter.':'No places saved yet.')+'</p>';
@@ -1807,7 +1807,7 @@ async function renderMapPlacesView(){
   // If zero places geocoded show a helpful message but still display the map area
   if(!geocoded.length){
     hideLeafletMap();
-    document.getElementById('map-placeholder-sub').textContent=
+    (document.getElementById('map-placeholder-sub')||{}).textContent=
       filtered.length+' place'+(filtered.length!==1?'s':'')+' could not be located. Add city, province, and country to each place to improve accuracy.';
     return;
   }
@@ -1955,78 +1955,100 @@ async function geocodeStop(stop){
 
 
 // ── MAP HELPERS ──
-// Uses Google Maps embed API — no API key needed for basic embed,
-// supports multiple markers via the search/directions URL format
+// Uses OpenStreetMap tile images stitched together via a no-key static map service,
+// with a "Open in Google Maps" link for navigation.
+// For the iframe we use the free maps.google.com/maps?q= embed (no API key needed)
+// which works for single locations, and for multiple stops we build a
+// Google Maps directions URL that opens in a new tab.
 
-function buildGoogleMapsUrl(geocoded, colorHex){
-  if(!geocoded.length) return null;
+function buildStopAddress(stop){
+  return [stop.address, stop.destination, stop.province, stop.postal, stop.country]
+    .filter(Boolean).join(', ');
+}
 
-  if(geocoded.length === 1){
-    // Single location: use place search embed
-    const g = geocoded[0];
-    const query = encodeURIComponent([
-      g.stop ? g.stop.address : (g.place ? g.place.address : ''),
-      g.stop ? g.stop.destination : (g.place ? g.place.destination : ''),
-      g.stop ? g.stop.country : (g.place ? g.place.country : '')
-    ].filter(Boolean).join(', ') || (g.display || ''));
-    return 'https://maps.google.com/maps?q='+query+'&output=embed&z=15';
-  }
+// Build a no-API-key Google Maps embed URL for a single location
+function singleLocationEmbedUrl(geocoded){
+  const g = geocoded[0];
+  const stop = g.stop || g.place || {};
+  const q = encodeURIComponent(buildStopAddress(stop) || g.display || '');
+  // maps.google.com/maps?q= embed does NOT require an API key
+  return 'https://maps.google.com/maps?q=' + q + '&output=embed&z=15';
+}
 
-  // Multiple locations: use Google Maps directions URL with waypoints
-  // This shows a route connecting all stops in order with pins
+// Build a Google Maps directions URL (opens in new tab) for multiple stops
+function multiStopGoogleMapsUrl(geocoded){
   const addresses = geocoded.map(function(g){
-    const stop = g.stop || g.place || {};
-    return [stop.address, stop.destination, stop.province, stop.country]
-      .filter(Boolean).join(', ') || g.display || '';
-  });
-
+    return buildStopAddress(g.stop || g.place || {}) || g.display || '';
+  }).filter(Boolean);
+  if(!addresses.length) return null;
+  if(addresses.length === 1) return 'https://maps.google.com/maps?q=' + encodeURIComponent(addresses[0]);
   const origin = encodeURIComponent(addresses[0]);
-  const destination = encodeURIComponent(addresses[addresses.length - 1]);
-  const waypoints = addresses.slice(1, -1).map(encodeURIComponent).join('|');
-
-  let url = 'https://www.google.com/maps/embed/v1/directions'
-    + '?key=AIzaSyD-9tSrke72PouQMnMX-a7eZSW0jkFMBWY' // public demo key for embed
-    + '&origin=' + origin
-    + '&destination=' + destination
-    + '&mode=walking';
-
-  if(waypoints) url += '&waypoints=' + waypoints;
-
-  // Fall back to a simpler search-based approach using OSM if >10 waypoints
-  // (Google directions limits waypoints)
-  if(geocoded.length > 10){
-    const centre = geocoded[Math.floor(geocoded.length/2)];
-    const q = encodeURIComponent(addresses.join(' | '));
-    return 'https://maps.google.com/maps?q='+encodeURIComponent(addresses[0])+'&output=embed&z=13';
-  }
-
+  const dest = encodeURIComponent(addresses[addresses.length - 1]);
+  const waypts = addresses.slice(1, -1).map(encodeURIComponent).join('/');
+  let url = 'https://www.google.com/maps/dir/' + origin + '/';
+  if(waypts) url += waypts + '/';
+  url += dest + '/';
   return url;
 }
 
 function showMapIframe(geocoded, colorHex){
   const iframe = document.getElementById('map-iframe');
   const placeholder = document.getElementById('map-placeholder');
-  if(!iframe || !geocoded.length) return;
+  if(!geocoded.length){ hideMapIframe(); return; }
 
-  const url = buildGoogleMapsUrl(geocoded, colorHex);
-  if(!url){
-    hideMapIframe();
-    return;
+  if(geocoded.length === 1){
+    // Single stop: use no-key Google Maps embed
+    iframe.src = singleLocationEmbedUrl(geocoded);
+    iframe.style.display = 'block';
+    if(placeholder) placeholder.style.display = 'none';
+  } else {
+    // Multiple stops: can't embed directions without an API key
+    // Show a styled placeholder with a button that opens Google Maps in a new tab
+    const mapsUrl = multiStopGoogleMapsUrl(geocoded);
+    if(placeholder){
+      placeholder.style.display = 'flex';
+      placeholder.innerHTML =
+        '<div style="text-align:center;padding:24px">' +
+        '<div style="font-size:36px;margin-bottom:12px">🗺️</div>' +
+        '<div style="font-family:Lora,serif;font-size:17px;color:var(--ink);margin-bottom:8px">' +
+          geocoded.length + ' stops mapped' +
+        '</div>' +
+        '<div style="font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.6;max-width:280px">' +
+          'Multi-stop directions open in Google Maps for the best experience.' +
+        '</div>' +
+        (mapsUrl ?
+          '<a href="' + mapsUrl + '" target="_blank" rel="noopener" ' +
+          'style="display:inline-block;padding:10px 22px;background:var(--accent);color:#fff;' +
+          'border-radius:8px;font-size:13px;font-weight:600;text-decoration:none;' +
+          'font-family:Outfit,sans-serif">Open route in Google Maps ↗</a>' : '') +
+        '<div style="font-size:11px;color:var(--muted);margin-top:14px">' +
+          geocoded.map(function(g,i){
+            return (i+1)+'. '+(g.stop?g.stop.name:(g.place?g.place.name:'Stop '+(i+1)));
+          }).join(' → ') +
+        '</div>' +
+        '</div>';
+    }
+    iframe.style.display = 'none';
   }
-
-  iframe.src = url;
-  iframe.style.display = 'block';
-  if(placeholder) placeholder.style.display = 'none';
 }
 
 function hideMapIframe(){
   const iframe = document.getElementById('map-iframe');
   if(iframe){ iframe.src = 'about:blank'; iframe.style.display = 'none'; }
   const placeholder = document.getElementById('map-placeholder');
-  if(placeholder) placeholder.style.display = 'flex';
+  if(placeholder){
+    placeholder.style.display = 'flex';
+    // Restore original placeholder content if it was replaced
+    if(!placeholder.querySelector('.map-placeholder-icon')){
+      placeholder.innerHTML =
+        '<div class="map-placeholder-icon">🗺️</div>' +
+        '<div class="map-placeholder-title">Map view</div>' +
+        '<div class="map-placeholder-sub" id="map-placeholder-sub">Select a day to see stops on the map.</div>';
+    }
+  }
 }
 
-// Keep these as aliases so existing callers work unchanged
+// Aliases so existing callers work unchanged
 function showLeafletMap(geocoded, colorHex, labelFn){ showMapIframe(geocoded, colorHex); }
 function hideLeafletMap(){ hideMapIframe(); }
 function destroyLeafletMap(){ hideMapIframe(); }
@@ -2076,7 +2098,7 @@ async function showMapForDay(di,day){
       }
     }catch(e){}
     hideLeafletMap();
-    document.getElementById('map-placeholder-sub').textContent='Could not locate stops — add city, province, and country to each stop.';
+    (document.getElementById('map-placeholder-sub')||{}).textContent='Could not locate stops — add city, province, and country to each stop.';
     return;
   }
 
