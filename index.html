@@ -1250,9 +1250,14 @@ async function callClaude(prompt,maxTokens=1500){
   if(window.location.protocol==='file:'){
     throw new Error('AI suggestions require the app to be hosted on a web server (not opened as a local file). All manual planning features work normally.');
   }
-  const r=await fetch('https://api.anthropic.com/v1/messages',{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
+const r=await fetch('https://api.anthropic.com/v1/messages',{
+  method:'POST',
+  headers:{
+    'Content-Type':'application/json',
+    'x-api-key':'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',
+    'anthropic-version':'2023-06-01',
+    'anthropic-dangerous-direct-browser-access':'true'
+  },
     body:JSON.stringify({
       model:'claude-sonnet-4-20250514',
       max_tokens:maxTokens,
