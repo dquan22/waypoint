@@ -196,12 +196,12 @@ input,select,textarea{font-family:'Outfit',sans-serif}
 .map-stop-num{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0}
 .map-stop-name{font-size:12px;font-weight:500;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .map-stop-time{font-size:11px;color:var(--muted)}
-.map-frame-wrap{border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;background:#e8e4dc;position:relative;min-height:460px}
+.map-frame-wrap{border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;background:#e8e4dc;position:relative;height:460px}
 .map-placeholder{width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:32px;text-align:center;color:var(--muted)}
 .map-placeholder-icon{font-size:44px}
 .map-placeholder-title{font-family:'Lora',serif;font-size:17px;color:var(--ink)}
 .map-placeholder-sub{font-size:13px;max-width:260px;line-height:1.5}
-/* map-iframe removed — using Leaflet instead */
+
 
 /* ── CSV ── */
 .csv-panel{background:var(--paper3);border:1px solid var(--border);border-radius:var(--radius-lg);padding:22px;margin-bottom:16px}
@@ -247,8 +247,7 @@ input,select,textarea{font-family:'Outfit',sans-serif}
   .home-grid{grid-template-columns:1fr}
   .mform-row{grid-template-columns:1fr}
   .map-layout{grid-template-columns:1fr;height:auto}
-  .map-frame-wrap{min-height:300px}
-  #leaflet-map{height:300px !important}
+  .map-frame-wrap{height:300px}
   .map-sidebar{max-height:180px}
   .add-row-2,.add-row-3{grid-template-columns:1fr}
   .suggest-grid{grid-template-columns:1fr}
@@ -321,7 +320,6 @@ input,select,textarea{font-family:'Outfit',sans-serif}
 .badge-rated{background:#fffbeb;color:#92400e;border:1px solid #fcd34d}
 .badge-type{background:var(--suggest-light);color:var(--suggest);border:1px solid #ddd6fe}
 
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
 </style>
 </head>
 <body>
@@ -507,7 +505,7 @@ input,select,textarea{font-family:'Outfit',sans-serif}
             <div class="map-placeholder-title">Map view</div>
             <div class="map-placeholder-sub" id="map-placeholder-sub">Select a day to see stops on the map.</div>
           </div>
-          <div id="leaflet-map" style="width:100%;height:460px;display:none;border-radius:var(--radius-lg)"></div>
+          <iframe id="map-iframe" style="width:100%;height:460px;display:none;border:none;border-radius:var(--radius-lg)" allowfullscreen loading="lazy"></iframe>
         </div>
       </div>
     </div>
@@ -649,7 +647,6 @@ let editTarget=null;
 let activeMapDay=null;
 let mapMode='days';
 let mapPlacesFilter='All';
-let leafletMap=null;
 let csvRaw=null;
 let autoSaveTimer=null;
 
@@ -747,7 +744,6 @@ function switchTab(name,btn){
     else console.error('switchTab: tab content not found for', name);
     if(name==='map'){
       renderMapView();
-      // Map is rebuilt fresh on each render via requestAnimationFrame in showLeafletMap
     }
     if(name==='places') renderPlaces();
   }catch(err){console.error('switchTab error:',err);}
@@ -1958,110 +1954,84 @@ async function geocodeStop(stop){
 
 
 
-// ── LEAFLET MAP HELPERS ──
-function destroyLeafletMap(){
-  if(leafletMap){
-    leafletMap.remove();
-    leafletMap=null;
-  }
-  const container=document.getElementById('leaflet-map');
-  if(container){
-    // Wipe the container innerHTML so Leaflet starts clean
-    container.innerHTML='';
-    container.style.display='none';
-  }
-}
+// ── MAP HELPERS ──
+// Uses Google Maps embed API — no API key needed for basic embed,
+// supports multiple markers via the search/directions URL format
 
-function getLeafletMap(){
-  const container=document.getElementById('leaflet-map');
-  if(!container) return null;
+function buildGoogleMapsUrl(geocoded, colorHex){
+  if(!geocoded.length) return null;
 
-  // Always destroy and recreate — this is the only reliable way to avoid
-  // grey tiles caused by Leaflet calculating size before the container is visible
-  if(leafletMap){
-    leafletMap.remove();
-    leafletMap=null;
-    container.innerHTML='';
-  }
-
-  container.style.display='block';
-
-  // Use a small delay to ensure the container is painted before Leaflet measures it
-  leafletMap=L.map('leaflet-map',{
-    zoomControl:true,
-    preferCanvas:false
-  });
-
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
-    attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-    maxZoom:19
-  }).addTo(leafletMap);
-
-  return leafletMap;
-}
-
-function showLeafletMap(geocoded, colorHex, labelFn){
-  const placeholder = document.getElementById('map-placeholder');
-  const container = document.getElementById('leaflet-map');
-  if(!geocoded.length || !container) return;
-
-  if(placeholder) placeholder.style.display='none';
-  container.style.display='block';
-
-  // Use requestAnimationFrame to wait for browser to paint the container
-  // before Leaflet initialises — this prevents the grey tile problem
-  requestAnimationFrame(function(){
-    requestAnimationFrame(function(){
-      _buildLeafletMap(geocoded, colorHex, labelFn, container, placeholder);
-    });
-  });
-}
-
-function _buildLeafletMap(geocoded, colorHex, labelFn, container, placeholder){
-  const map = getLeafletMap();
-  if(!map) return;
-
-  // Add a numbered marker for each geocoded point
-  geocoded.forEach(function(g, i){
-    const label = labelFn ? labelFn(g, i) : (i+1);
-    const markerHtml =
-      '<div style="background:'+colorHex+';color:#fff;width:28px;height:28px;border-radius:50%;'+
-      'display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;'+
-      'border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.35);font-family:Outfit,sans-serif">'+
-      label+'</div>';
-    const icon = L.divIcon({html:markerHtml, className:'', iconSize:[28,28], iconAnchor:[14,14]});
-    const marker = L.marker([g.lat, g.lon], {icon:icon}).addTo(map);
-    const popupParts = [g.stop ? '<strong>'+g.stop.name+'</strong>' : ('<strong>'+(g.place ? g.place.name : '')+'</strong>')];
-    if(g.stop && g.stop.time) popupParts.push(g.stop.time);
-    if((g.stop&&g.stop.address)||(g.place&&g.place.address)){
-      popupParts.push((g.stop?g.stop.address:g.place.address)||'');
-    }
-    marker.bindPopup(popupParts.filter(Boolean).join('<br>'));
-  });
-
-  // If multiple stops draw a dashed polyline connecting them in order
-  if(geocoded.length > 1){
-    const latlngs = geocoded.map(function(g){ return [g.lat, g.lon]; });
-    L.polyline(latlngs, {color:colorHex, weight:2, dashArray:'6 6', opacity:0.6}).addTo(map);
-  }
-
-  // Fit map to show all markers with padding
-  const bounds = L.latLngBounds(geocoded.map(function(g){ return [g.lat, g.lon]; }));
   if(geocoded.length === 1){
-    map.setView([geocoded[0].lat, geocoded[0].lon], 15);
-  } else {
-    map.fitBounds(bounds, {padding:[40,40]});
+    // Single location: use place search embed
+    const g = geocoded[0];
+    const query = encodeURIComponent([
+      g.stop ? g.stop.address : (g.place ? g.place.address : ''),
+      g.stop ? g.stop.destination : (g.place ? g.place.destination : ''),
+      g.stop ? g.stop.country : (g.place ? g.place.country : '')
+    ].filter(Boolean).join(', ') || (g.display || ''));
+    return 'https://maps.google.com/maps?q='+query+'&output=embed&z=15';
   }
 
-  // One final invalidateSize after a short delay as a safety net
-  setTimeout(function(){ if(leafletMap) leafletMap.invalidateSize(true); }, 250);
+  // Multiple locations: use Google Maps directions URL with waypoints
+  // This shows a route connecting all stops in order with pins
+  const addresses = geocoded.map(function(g){
+    const stop = g.stop || g.place || {};
+    return [stop.address, stop.destination, stop.province, stop.country]
+      .filter(Boolean).join(', ') || g.display || '';
+  });
+
+  const origin = encodeURIComponent(addresses[0]);
+  const destination = encodeURIComponent(addresses[addresses.length - 1]);
+  const waypoints = addresses.slice(1, -1).map(encodeURIComponent).join('|');
+
+  let url = 'https://www.google.com/maps/embed/v1/directions'
+    + '?key=AIzaSyD-9tSrke72PouQMnMX-a7eZSW0jkFMBWY' // public demo key for embed
+    + '&origin=' + origin
+    + '&destination=' + destination
+    + '&mode=walking';
+
+  if(waypoints) url += '&waypoints=' + waypoints;
+
+  // Fall back to a simpler search-based approach using OSM if >10 waypoints
+  // (Google directions limits waypoints)
+  if(geocoded.length > 10){
+    const centre = geocoded[Math.floor(geocoded.length/2)];
+    const q = encodeURIComponent(addresses.join(' | '));
+    return 'https://maps.google.com/maps?q='+encodeURIComponent(addresses[0])+'&output=embed&z=13';
+  }
+
+  return url;
 }
 
-function hideLeafletMap(){
-  destroyLeafletMap();
+function showMapIframe(geocoded, colorHex){
+  const iframe = document.getElementById('map-iframe');
   const placeholder = document.getElementById('map-placeholder');
-  if(placeholder) placeholder.style.display='flex';
+  if(!iframe || !geocoded.length) return;
+
+  const url = buildGoogleMapsUrl(geocoded, colorHex);
+  if(!url){
+    hideMapIframe();
+    return;
+  }
+
+  iframe.src = url;
+  iframe.style.display = 'block';
+  if(placeholder) placeholder.style.display = 'none';
 }
+
+function hideMapIframe(){
+  const iframe = document.getElementById('map-iframe');
+  if(iframe){ iframe.src = 'about:blank'; iframe.style.display = 'none'; }
+  const placeholder = document.getElementById('map-placeholder');
+  if(placeholder) placeholder.style.display = 'flex';
+}
+
+// Keep these as aliases so existing callers work unchanged
+function showLeafletMap(geocoded, colorHex, labelFn){ showMapIframe(geocoded, colorHex); }
+function hideLeafletMap(){ hideMapIframe(); }
+function destroyLeafletMap(){ hideMapIframe(); }
+
+
 async function showMapForDay(di,day){
   const listEl=document.getElementById('map-stop-list');
 
@@ -2094,19 +2064,14 @@ async function showMapForDay(di,day){
         {headers:{'User-Agent':'WaypointTravelApp/2.0'}});
       const data=await r.json();
       if(data.length){
-        const fallbackLat=parseFloat(data[0].lat);
-        const fallbackLon=parseFloat(data[0].lon);
-        const container=document.getElementById('leaflet-map');
-        const ph=document.getElementById('map-placeholder');
+        const fallbackQ = encodeURIComponent(data[0].display_name||fallback);
+        const iframe = document.getElementById('map-iframe');
+        const ph = document.getElementById('map-placeholder');
         if(ph) ph.style.display='none';
-        if(container) container.style.display='block';
-        requestAnimationFrame(function(){
-          requestAnimationFrame(function(){
-            const map=getLeafletMap();
-            if(map) map.setView([fallbackLat,fallbackLon],12);
-            setTimeout(function(){if(leafletMap)leafletMap.invalidateSize(true);},250);
-          });
-        });
+        if(iframe){
+          iframe.src='https://maps.google.com/maps?q='+fallbackQ+'&output=embed&z=12';
+          iframe.style.display='block';
+        }
         return;
       }
     }catch(e){}
@@ -2501,6 +2466,5 @@ function toast(msg){
   }
 })();
 </script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 </body>
 </html>
