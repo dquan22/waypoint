@@ -201,7 +201,7 @@ input,select,textarea{font-family:'Outfit',sans-serif}
 .map-placeholder-icon{font-size:44px}
 .map-placeholder-title{font-family:'Lora',serif;font-size:17px;color:var(--ink)}
 .map-placeholder-sub{font-size:13px;max-width:260px;line-height:1.5}
-.map-iframe{width:100%;height:100%;border:none;display:none}
+/* map-iframe removed — using Leaflet instead */
 
 /* ── CSV ── */
 .csv-panel{background:var(--paper3);border:1px solid var(--border);border-radius:var(--radius-lg);padding:22px;margin-bottom:16px}
@@ -320,6 +320,7 @@ input,select,textarea{font-family:'Outfit',sans-serif}
 .badge-rated{background:#fffbeb;color:#92400e;border:1px solid #fcd34d}
 .badge-type{background:var(--suggest-light);color:var(--suggest);border:1px solid #ddd6fe}
 
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
 </style>
 </head>
 <body>
@@ -499,13 +500,13 @@ input,select,textarea{font-family:'Outfit',sans-serif}
           <div class="map-sb-label" id="map-sb-label">Stops</div>
           <div id="map-stop-list"><p style="font-size:12px;color:var(--muted)">Select a day above.</p></div>
         </div>
-        <div class="map-frame-wrap">
+        <div class="map-frame-wrap" style="position:relative">
           <div class="map-placeholder" id="map-placeholder">
             <div class="map-placeholder-icon">🗺️</div>
             <div class="map-placeholder-title">Map view</div>
             <div class="map-placeholder-sub" id="map-placeholder-sub">Select a day to see stops on the map.</div>
           </div>
-          <iframe class="map-iframe" id="map-iframe"></iframe>
+          <div id="leaflet-map" style="width:100%;height:100%;display:none;border-radius:var(--radius-lg);overflow:hidden"></div>
         </div>
       </div>
     </div>
@@ -647,6 +648,7 @@ let editTarget=null;
 let activeMapDay=null;
 let mapMode='days';
 let mapPlacesFilter='All';
+let leafletMap=null;
 let csvRaw=null;
 let autoSaveTimer=null;
 
@@ -1243,22 +1245,25 @@ function copyShareLink(){
 // ═══════════════════════════════════════════
 // AI — CLAUDE API
 // ═══════════════════════════════════════════
-async function callClaude(prompt, maxTokens=1500){
+async function callClaude(prompt,maxTokens=1500){
+  // When running from file://, API calls are blocked by CORS.
+  // The app still works fully for manual planning — AI suggestions
+  // require hosting the file on a web server or using it inside Claude.
   if(window.location.protocol==='file:'){
-    throw new Error('AI suggestions require the hosted version of this app.');
+    throw new Error('AI suggestions require the app to be hosted on a web server (not opened as a local file). All manual planning features work normally.');
   }
-  const r = await fetch('https://waypoint-proxy.david-quan22.workers.dev', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: maxTokens,
-      messages: [{ role: 'user', content: prompt }]
+  const r=await fetch('https://api.anthropic.com/v1/messages',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      model:'claude-sonnet-4-20250514',
+      max_tokens:maxTokens,
+      messages:[{role:'user',content:prompt}]
     })
   });
-  const d = await r.json();
-  if(!r.ok) throw new Error(d.error?.message || 'API error');
-  return d.content?.[0]?.text || '';
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.error?.message||'API error');
+  return d.content?.[0]?.text||'';
 }
 
 function buildContext(){
@@ -1659,13 +1664,10 @@ function renderMapView(){
 function renderMapDaysView(){
   renderMapPills();
   const listEl=document.getElementById('map-stop-list');
-  const iframe=document.getElementById('map-iframe');
-  const placeholder=document.getElementById('map-placeholder');
   listEl.innerHTML='';
 
   if(activeMapDay===null){
-    iframe.style.display='none';
-    placeholder.style.display='flex';
+    hideLeafletMap();
     document.getElementById('map-placeholder-sub').textContent='Select a day to see stops on the map.';
     listEl.innerHTML='<p style="font-size:12px;color:var(--muted)">Select a day above.</p>';
     return;
@@ -1675,8 +1677,7 @@ function renderMapDaysView(){
   const color=dc(activeMapDay);
 
   if(!day.stops.length){
-    iframe.style.display='none';
-    placeholder.style.display='flex';
+    hideLeafletMap();
     document.getElementById('map-placeholder-sub').textContent='No stops on Day '+day.day+' yet.';
     listEl.innerHTML='<p style="font-size:12px;color:var(--muted)">No stops on this day.</p>';
     return;
@@ -1719,8 +1720,6 @@ async function renderMapPlacesView(){
   renderMapPlacesFilter();
   if(!trip.places) trip.places=[];
   const listEl=document.getElementById('map-stop-list');
-  const iframe=document.getElementById('map-iframe');
-  const placeholder=document.getElementById('map-placeholder');
   listEl.innerHTML='';
 
   // Apply type filter
@@ -1807,11 +1806,9 @@ async function renderMapPlacesView(){
 
   // If zero places geocoded show a helpful message but still display the map area
   if(!geocoded.length){
-    iframe.style.display='none';
-    placeholder.style.display='flex';
-    const failCount=filtered.length;
+    hideLeafletMap();
     document.getElementById('map-placeholder-sub').textContent=
-      failCount+' place'+(failCount!==1?'s':'')+' could not be located. Add city, province, and country to each place to improve accuracy.';
+      filtered.length+' place'+(filtered.length!==1?'s':'')+' could not be located. Add city, province, and country to each place to improve accuracy.';
     return;
   }
 
@@ -1824,26 +1821,7 @@ async function renderMapPlacesView(){
     listEl.insertAdjacentElement('afterbegin',note);
   }
 
-  // Bounding box across all successfully geocoded places
-  const lats=geocoded.map(function(g){return g.lat;});
-  const lons=geocoded.map(function(g){return g.lon;});
-  const minLat=Math.min.apply(null,lats);
-  const maxLat=Math.max.apply(null,lats);
-  const minLon=Math.min.apply(null,lons);
-  const maxLon=Math.max.apply(null,lons);
-  const latPad=Math.max(0.02,(maxLat-minLat)*0.3);
-  const lonPad=Math.max(0.02,(maxLon-minLon)*0.3);
-  const bbox=(minLon-lonPad)+','+(minLat-latPad)+','+(maxLon+lonPad)+','+(maxLat+latPad);
-
-  if(geocoded.length===1){
-    const g=geocoded[0];
-    const pad=0.015;
-    iframe.src='https://www.openstreetmap.org/export/embed.html?bbox='+(g.lon-pad)+','+(g.lat-pad)+','+(g.lon+pad)+','+(g.lat+pad)+'&layer=mapnik&marker='+g.lat+','+g.lon;
-  } else {
-    iframe.src='https://www.openstreetmap.org/export/embed.html?bbox='+bbox+'&layer=mapnik';
-  }
-  iframe.style.display='block';
-  placeholder.style.display='none';
+  showLeafletMap(geocoded, '#7c3aed', function(g,i){ return i+1; });
 }
 
 // Build a freeform geocode query from most specific to least specific.
@@ -1975,77 +1953,129 @@ async function geocodeStop(stop){
 }
 
 
-async function showMapForDay(di,day){
-  const iframe=document.getElementById('map-iframe');
-  const placeholder=document.getElementById('map-placeholder');
-  const listEl=document.getElementById('map-stop-list');
 
-  // Try to geocode each stop individually for accurate markers
-  // Fall back to day-level centre if stops have no location data
-  const geocoded=[];
-  for(const stop of day.stops){
-    const result=await geocodeStop(stop);
-    if(result) geocoded.push({stop, ...result});
+// ── LEAFLET MAP HELPERS ──
+function getLeafletMap(){
+  const container = document.getElementById('leaflet-map');
+  if(!container) return null;
+  if(leafletMap){
+    // Remove all existing layers
+    leafletMap.eachLayer(function(layer){ leafletMap.removeLayer(layer); });
+    // Re-add base tile layer
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+      attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      maxZoom:19
+    }).addTo(leafletMap);
+    return leafletMap;
+  }
+  container.style.display='block';
+  leafletMap = L.map('leaflet-map',{zoomControl:true});
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+    attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    maxZoom:19
+  }).addTo(leafletMap);
+  return leafletMap;
+}
+
+function showLeafletMap(geocoded, colorHex, labelFn){
+  const placeholder = document.getElementById('map-placeholder');
+  const container = document.getElementById('leaflet-map');
+  if(!geocoded.length || !container) return;
+
+  container.style.display='block';
+  if(placeholder) placeholder.style.display='none';
+
+  const map = getLeafletMap();
+  if(!map) return;
+
+  // Add a numbered marker for each geocoded point
+  geocoded.forEach(function(g, i){
+    const label = labelFn ? labelFn(g, i) : (i+1);
+    const markerHtml =
+      '<div style="background:'+colorHex+';color:#fff;width:28px;height:28px;border-radius:50%;'+
+      'display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;'+
+      'border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.35);font-family:Outfit,sans-serif">'+
+      label+'</div>';
+    const icon = L.divIcon({html:markerHtml, className:'', iconSize:[28,28], iconAnchor:[14,14]});
+    const marker = L.marker([g.lat, g.lon], {icon:icon}).addTo(map);
+    const popupParts = [g.stop ? '<strong>'+g.stop.name+'</strong>' : ('<strong>'+(g.place ? g.place.name : '')+'</strong>')];
+    if(g.stop && g.stop.time) popupParts.push(g.stop.time);
+    if((g.stop&&g.stop.address)||(g.place&&g.place.address)){
+      popupParts.push((g.stop?g.stop.address:g.place.address)||'');
+    }
+    marker.bindPopup(popupParts.filter(Boolean).join('<br>'));
+  });
+
+  // If multiple stops draw a dashed polyline connecting them in order
+  if(geocoded.length > 1){
+    const latlngs = geocoded.map(function(g){ return [g.lat, g.lon]; });
+    L.polyline(latlngs, {color:colorHex, weight:2, dashArray:'6 6', opacity:0.6}).addTo(map);
   }
 
-  // Update sidebar with geocode status
-  listEl.querySelectorAll('.map-stop-row').forEach((row,i)=>{
-    const found=geocoded[i];
+  // Fit map to show all markers with padding
+  const bounds = L.latLngBounds(geocoded.map(function(g){ return [g.lat, g.lon]; }));
+  if(geocoded.length === 1){
+    map.setView([geocoded[0].lat, geocoded[0].lon], 15);
+  } else {
+    map.fitBounds(bounds, {padding:[40,40]});
+  }
+
+  // Force Leaflet to recalculate size after display change
+  setTimeout(function(){ if(leafletMap) leafletMap.invalidateSize(); }, 100);
+}
+
+function hideLeafletMap(){
+  const container = document.getElementById('leaflet-map');
+  if(container) container.style.display='none';
+  const placeholder = document.getElementById('map-placeholder');
+  if(placeholder) placeholder.style.display='flex';
+}
+async function showMapForDay(di,day){
+  const listEl=document.getElementById('map-stop-list');
+
+  // Geocode each stop, wrapping individually so one failure doesn't block others
+  const geocoded=[];
+  for(var i=0;i<day.stops.length;i++){
+    try{
+      const result=await geocodeStop(day.stops[i]);
+      if(result&&result.lat&&result.lon){
+        geocoded.push({stop:day.stops[i], idx:i, lat:result.lat, lon:result.lon});
+      }
+    }catch(e){ console.warn('Geocode failed for stop:', day.stops[i].name, e); }
+  }
+
+  // Update sidebar — dim stops that couldn't be located
+  listEl.querySelectorAll('.map-stop-row').forEach(function(row,i){
+    const found=geocoded.find(function(g){return g.idx===i;});
     const nameEl=row.querySelector('.map-stop-name');
-    if(nameEl && !found){
-      nameEl.style.opacity='0.5';
-      nameEl.title='Location not found — add more address detail';
+    if(nameEl&&!found){
+      nameEl.style.opacity='0.45';
+      nameEl.title='Location not found — add city, province, and country for better accuracy';
     }
   });
 
   if(!geocoded.length){
-    // No stops geocoded — try falling back to trip destination
-    const fallback=[trip.destinations?.[0],trip.name].filter(Boolean)[0]||'';
+    // Nothing geocoded — fall back to centring on the trip destination
+    const fallback=[trip.destinations&&trip.destinations[0],trip.name].filter(Boolean)[0]||'';
     try{
       const r=await fetch('https://nominatim.openstreetmap.org/search?q='+encodeURIComponent(fallback)+'&format=json&limit=1',
         {headers:{'User-Agent':'WaypointTravelApp/2.0'}});
       const data=await r.json();
       if(data.length){
-        const lat=parseFloat(data[0].lat);
-        const lon=parseFloat(data[0].lon);
-        const pad=0.06;
-        iframe.src='https://www.openstreetmap.org/export/embed.html?bbox='+(lon-pad)+','+(lat-pad)+','+(lon+pad)+','+(lat+pad)+'&layer=mapnik&marker='+lat+','+lon;
-        iframe.style.display='block';
-        placeholder.style.display='none';
+        const map=getLeafletMap();
+        if(map) map.setView([parseFloat(data[0].lat),parseFloat(data[0].lon)],12);
+        document.getElementById('leaflet-map').style.display='block';
+        document.getElementById('map-placeholder').style.display='none';
+        setTimeout(function(){if(leafletMap)leafletMap.invalidateSize();},100);
         return;
       }
     }catch(e){}
-    placeholder.style.display='flex';
-    document.getElementById('map-placeholder-sub').textContent='Could not locate stops — try adding city, province, and country to each stop.';
-    iframe.style.display='none';
+    hideLeafletMap();
+    document.getElementById('map-placeholder-sub').textContent='Could not locate stops — add city, province, and country to each stop.';
     return;
   }
 
-  // Calculate bounding box from all geocoded stops
-  const lats=geocoded.map(g=>g.lat);
-  const lons=geocoded.map(g=>g.lon);
-  const minLat=Math.min(...lats);
-  const maxLat=Math.max(...lats);
-  const minLon=Math.min(...lons);
-  const maxLon=Math.max(...lons);
-
-  // Add padding around the bounding box
-  const latPad=Math.max(0.01, (maxLat-minLat)*0.3);
-  const lonPad=Math.max(0.01, (maxLon-minLon)*0.3);
-
-  const bbox=(minLon-lonPad)+','+(minLat-latPad)+','+(maxLon+lonPad)+','+(maxLat+latPad);
-
-  // If only one stop, use a tighter fixed zoom
-  if(geocoded.length===1){
-    const {lat,lon}=geocoded[0];
-    const pad=0.015;
-    iframe.src='https://www.openstreetmap.org/export/embed.html?bbox='+(lon-pad)+','+(lat-pad)+','+(lon+pad)+','+(lat+pad)+'&layer=mapnik&marker='+lat+','+lon;
-  } else {
-    iframe.src='https://www.openstreetmap.org/export/embed.html?bbox='+bbox+'&layer=mapnik';
-  }
-
-  iframe.style.display='block';
-  placeholder.style.display='none';
+  showLeafletMap(geocoded, dc(di), function(g,i){ return g.idx+1; });
 }
 
 // ═══════════════════════════════════════════
@@ -2431,5 +2461,6 @@ function toast(msg){
   }
 })();
 </script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 </body>
 </html>
