@@ -528,7 +528,7 @@ input,select,textarea{font-family:'Outfit',sans-serif}
               <div style="font-size:32px;margin-bottom:8px">🗺️</div>
               <div style="font-size:13px;color:var(--muted)">Add places with location data to see them here.</div>
             </div>
-            <iframe id="places-map-iframe" style="width:100%;height:100%;border:none;display:none;border-radius:var(--radius-lg)" loading="lazy"></iframe>
+            <canvas id="places-map-canvas" style="width:100%;height:100%;display:none;border-radius:var(--radius-lg)"></canvas>
           </div>
         </div>
       </div>
@@ -2081,67 +2081,260 @@ let placesMapFilter='All';
 
 // Build an OSM iframe URL that shows a bounding box of all geocoded places.
 // The iframe shows the map area reliably — numbered pins are shown in the legend sidebar.
-function buildPlacesMapHtml(geocoded){
-  if(!geocoded.length) return null;
+// ═══════════════════════════════════════════
+// PLACES MAP — canvas + OSM tiles
+// Draws OSM tile images onto a canvas and overlays numbered markers.
+// No external library needed. Works on file://, GitHub Pages, everywhere.
+// ═══════════════════════════════════════════
 
-  var lats=geocoded.map(function(g){return g.lat;});
-  var lons=geocoded.map(function(g){return g.lon;});
-  var minLat=Math.min.apply(null,lats);
-  var maxLat=Math.max.apply(null,lats);
-  var minLon=Math.min.apply(null,lons);
-  var maxLon=Math.max.apply(null,lons);
+// Convert lat/lon to OSM tile coordinates at a given zoom level
+function latLonToTile(lat, lon, zoom){
+  var n = Math.pow(2, zoom);
+  var x = Math.floor((lon + 180) / 360 * n);
+  var latRad = lat * Math.PI / 180;
+  var y = Math.floor((1 - Math.log(Math.tan(latRad) + 1/Math.cos(latRad)) / Math.PI) / 2 * n);
+  return {x:x, y:y};
+}
 
-  // Serialize marker data as JSON for injection into blob HTML
-  var markerData=geocoded.map(function(g,i){
-    var p=g.place||g.stop||{};
-    return {
-      lat:g.lat, lon:g.lon, num:i+1,
-      name:(p.name||('Place '+(i+1))).replace(/"/g,'&quot;'),
-      type:(p.type||'').replace(/"/g,'&quot;'),
-      addr:([p.address,p.destination].filter(Boolean).join(', ')).replace(/"/g,'&quot;')
-    };
+// Convert lat/lon to pixel position within a tile grid
+function latLonToPixel(lat, lon, zoom, tileSize, originTile){
+  var n = Math.pow(2, zoom);
+  var px = (lon + 180) / 360 * n * tileSize - originTile.x * tileSize;
+  var latRad = lat * Math.PI / 180;
+  var py = (1 - Math.log(Math.tan(latRad) + 1/Math.cos(latRad)) / Math.PI) / 2 * n * tileSize - originTile.y * tileSize;
+  return {x:px, y:py};
+}
+
+// Pick a zoom level that fits all points in the canvas
+function choosZoom(minLat, maxLat, minLon, maxLon, canvasW, canvasH, tileSize){
+  for(var z = 16; z >= 1; z--){
+    var tMin = latLonToTile(maxLat, minLon, z);
+    var tMax = latLonToTile(minLat, maxLon, z);
+    var tilesW = tMax.x - tMin.x + 1;
+    var tilesH = tMax.y - tMin.y + 1;
+    if(tilesW * tileSize <= canvasW * 1.5 && tilesH * tileSize <= canvasH * 1.5){
+      return z;
+    }
+  }
+  return 2;
+}
+
+async function renderPlacesMap(){
+  const canvas = document.getElementById('places-map-canvas');
+  const placeholder = document.getElementById('places-map-placeholder');
+  const legend = document.getElementById('places-map-legend');
+  const statusEl = document.getElementById('places-map-status');
+  if(!canvas || !trip) return;
+
+  if(!trip.places || !trip.places.length){
+    canvas.style.display='none';
+    if(placeholder) placeholder.style.display='flex';
+    if(legend) legend.innerHTML='<div style="font-size:11px;color:var(--muted);padding:8px">No places added yet.</div>';
+    if(statusEl) statusEl.textContent='';
+    return;
+  }
+
+  const filtered = placesMapFilter==='All'
+    ? trip.places
+    : trip.places.filter(function(p){ return (p.type||'📍 Other')===placesMapFilter; });
+
+  if(!filtered.length){
+    canvas.style.display='none';
+    if(placeholder){ placeholder.style.display='flex'; }
+    if(legend) legend.innerHTML='<div style="font-size:11px;color:var(--muted);padding:8px">No places match this filter.</div>';
+    if(statusEl) statusEl.textContent='';
+    return;
+  }
+
+  if(statusEl) statusEl.textContent = 'Locating '+filtered.length+' place'+(filtered.length!==1?'s':'')+'…';
+  if(legend) legend.innerHTML='<div style="font-size:11px;color:var(--muted);padding:8px;font-style:italic">Locating…</div>';
+
+  // Geocode all filtered places
+  var geocoded = [];
+  for(var i=0; i<filtered.length; i++){
+    try{
+      var result = await geocodeStop(filtered[i]);
+      if(result && result.lat && result.lon){
+        geocoded.push({place:filtered[i], idx:i, lat:result.lat, lon:result.lon});
+      }
+    }catch(e){ console.warn('Geocode failed:', filtered[i].name, e); }
+  }
+
+  // Build legend
+  if(legend){
+    legend.innerHTML='';
+    filtered.forEach(function(p,i){
+      var found = geocoded.find(function(g){return g.idx===i;});
+      var item = document.createElement('div');
+      item.className='places-map-legend-item';
+      var num = document.createElement('div');
+      num.className='places-map-legend-num';
+      num.style.background = found ? '#7c3aed' : 'var(--muted)';
+      num.textContent = i+1;
+      var info = document.createElement('div');
+      info.className='places-map-legend-info';
+      var name = document.createElement('div');
+      name.className='places-map-legend-name';
+      name.textContent = p.name;
+      name.style.opacity = found ? '1' : '0.45';
+      name.title = found ? '' : 'No location found — add city and country';
+      var sub = document.createElement('div');
+      sub.className='places-map-legend-sub';
+      sub.textContent = [p.type, p.destination].filter(Boolean).join(' · ')||'';
+      info.appendChild(name);
+      info.appendChild(sub);
+      item.appendChild(num);
+      item.appendChild(info);
+      legend.appendChild(item);
+    });
+  }
+
+  var failCount = filtered.length - geocoded.length;
+  if(statusEl){
+    statusEl.textContent = geocoded.length + ' of ' + filtered.length + ' located'
+      + (failCount ? ' ('+failCount+' need location data)' : '');
+  }
+
+  if(!geocoded.length){
+    canvas.style.display='none';
+    if(placeholder){
+      placeholder.style.display='flex';
+      placeholder.innerHTML='<div style="font-size:13px;color:var(--muted);text-align:center;padding:20px">'
+        +'No places could be located.<br><span style="font-size:11px">Add city, province, and country to each place.</span></div>';
+    }
+    return;
+  }
+
+  // Calculate bounding box with padding
+  var lats = geocoded.map(function(g){return g.lat;});
+  var lons = geocoded.map(function(g){return g.lon;});
+  var minLat = Math.min.apply(null,lats);
+  var maxLat = Math.max.apply(null,lats);
+  var minLon = Math.min.apply(null,lons);
+  var maxLon = Math.max.apply(null,lons);
+  var pad = Math.max(0.01, Math.max(maxLat-minLat, maxLon-minLon) * 0.3);
+  minLat -= pad; maxLat += pad;
+  minLon -= pad; maxLon += pad;
+
+  // Set canvas dimensions to match its display size
+  var rect = canvas.parentElement.getBoundingClientRect();
+  var W = Math.max(rect.width || 600, 400);
+  var H = Math.max(rect.height || 400, 300);
+  canvas.width = W;
+  canvas.height = H;
+  canvas.style.display = 'block';
+  if(placeholder) placeholder.style.display = 'none';
+
+  var ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#e8e0d8';
+  ctx.fillRect(0, 0, W, H);
+
+  var TILE = 256;
+  var zoom = choosZoom(minLat, maxLat, minLon, maxLon, W, H, TILE);
+
+  // Origin tile (top-left of our viewport)
+  var originTile = latLonToTile(maxLat, minLon, zoom);
+  var endTile = latLonToTile(minLat, maxLon, zoom);
+
+  // Calculate pixel offset to centre the bounding box in the canvas
+  var totalTilesW = endTile.x - originTile.x + 1;
+  var totalTilesH = endTile.y - originTile.y + 1;
+  var totalPxW = totalTilesW * TILE;
+  var totalPxH = totalTilesH * TILE;
+  var offsetX = Math.round((W - totalPxW) / 2);
+  var offsetY = Math.round((H - totalPxH) / 2);
+
+  // Load and draw all tiles
+  var tilePromises = [];
+  var subdomains = ['a','b','c'];
+  for(var tx = originTile.x; tx <= endTile.x; tx++){
+    for(var ty = originTile.y; ty <= endTile.y; ty++){
+      (function(tx, ty){
+        var sub = subdomains[(tx + ty) % 3];
+        var url = 'https://'+sub+'.tile.openstreetmap.org/'+zoom+'/'+tx+'/'+ty+'.png';
+        var px = offsetX + (tx - originTile.x) * TILE;
+        var py = offsetY + (ty - originTile.y) * TILE;
+        var p = new Promise(function(resolve){
+          var img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = function(){ ctx.drawImage(img, px, py, TILE, TILE); resolve(); };
+          img.onerror = function(){
+            // Draw placeholder tile on error
+            ctx.fillStyle='#ddd8d0';
+            ctx.fillRect(px, py, TILE, TILE);
+            ctx.strokeStyle='#ccc';
+            ctx.strokeRect(px, py, TILE, TILE);
+            resolve();
+          };
+          img.src = url;
+        });
+        tilePromises.push(p);
+      })(tx, ty);
+    }
+  }
+
+  // Wait for all tiles, then draw markers on top
+  await Promise.all(tilePromises);
+
+  // Draw connecting polyline between stops
+  if(geocoded.length > 1){
+    ctx.beginPath();
+    geocoded.forEach(function(g, i){
+      var pix = latLonToPixel(g.lat, g.lon, zoom, TILE, originTile);
+      var px = offsetX + pix.x;
+      var py = offsetY + pix.y;
+      if(i===0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    });
+    ctx.strokeStyle = '#7c3aed';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6,4]);
+    ctx.globalAlpha = 0.7;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.setLineDash([]);
+    ctx.lineWidth = 1;
+  }
+
+  // Draw markers
+  var R = 13;
+  geocoded.forEach(function(g, i){
+    var pix = latLonToPixel(g.lat, g.lon, zoom, TILE, originTile);
+    var px = offsetX + pix.x;
+    var py = offsetY + pix.y;
+    var num = g.idx + 1;
+
+    // Shadow
+    ctx.beginPath();
+    ctx.arc(px, py+2, R+1, 0, Math.PI*2);
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx.fill();
+
+    // Circle
+    ctx.beginPath();
+    ctx.arc(px, py, R, 0, Math.PI*2);
+    ctx.fillStyle = '#7c3aed';
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    ctx.lineWidth = 1;
+
+    // Number
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 11px Outfit,Arial,sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(num), px, py);
   });
 
-  // Build the iframe HTML as a plain string — use double quotes only inside JS,
-  // keep the HTML attribute values in single quotes to avoid any nesting issues
-  var markerStyle='background:#7c3aed;color:#fff;width:26px;height:26px;'
-    +'border-radius:50%;display:flex;align-items:center;justify-content:center;'
-    +'font-size:11px;font-weight:700;border:2px solid #fff;'
-    +'box-shadow:0 2px 5px rgba(0,0,0,.35);font-family:sans-serif';
-
-  var html='<!DOCTYPE html><html><head>'
-    +'<meta charset="UTF-8">'
-    +'<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">'
-    +'<style>*{margin:0;padding:0;box-sizing:border-box}html,body,#map{width:100%;height:100%;overflow:hidden}</style>'
-    +'</head><body><div id="map"></div>'
-    +'<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"><'
-    +'/script><script>'
-    +'(function(){'
-    +'var data='+JSON.stringify(markerData)+';'
-    +'var map=L.map("map");'
-    +'L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(map);'
-    +'var ll=[];'
-    +'data.forEach(function(m){'
-    +'var d=document.createElement("div");'
-    +'d.style.cssText="'+markerStyle+'";'
-    +'d.textContent=m.num;'
-    +'var ic=L.divIcon({html:d.outerHTML,className:"",iconSize:[26,26],iconAnchor:[13,13]});'
-    +'var mk=L.marker([m.lat,m.lon],{icon:ic}).addTo(map);'
-    +'var pop="<b>"+m.name+"</b>";'
-    +'if(m.type)pop+="<br><small>"+m.type+"</small>";'
-    +'if(m.addr)pop+="<br><small style=\"color:#059669\">"+m.addr+"</small>";'
-    +'mk.bindPopup(pop);'
-    +'ll.push([m.lat,m.lon]);'
-    +'});'
-    +'if(ll.length===1){map.setView(ll[0],15);}'
-    +'else{'
-    +'map.fitBounds(L.latLngBounds(ll),{padding:[40,40]});'
-    +'L.polyline(ll,{color:"#7c3aed",weight:2,dashArray:"5 4",opacity:0.6}).addTo(map);'
-    +'}'
-    +'})();'
-    +'<'+'/script></body></html>';
-
-  return html;
+  // OSM attribution
+  ctx.fillStyle = 'rgba(255,255,255,0.75)';
+  ctx.fillRect(W-160, H-18, 160, 18);
+  ctx.fillStyle = '#666';
+  ctx.font = '10px Arial,sans-serif';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('© OpenStreetMap contributors', W-4, H-9);
 }
 
 
@@ -2239,111 +2432,6 @@ async function geocodeStop(stop){
   return null;
 }
 
-
-async function renderPlacesMap(){
-  const iframe=document.getElementById('places-map-iframe');
-  const placeholder=document.getElementById('places-map-placeholder');
-  const legend=document.getElementById('places-map-legend');
-  const statusEl=document.getElementById('places-map-status');
-  if(!iframe||!trip) return;
-
-  if(!trip.places||!trip.places.length){
-    if(placeholder) placeholder.style.display='flex';
-    iframe.style.display='none';
-    if(legend) legend.innerHTML='<div style="font-size:11px;color:var(--muted);padding:8px">No places added yet.</div>';
-    if(statusEl) statusEl.textContent='';
-    return;
-  }
-
-  const filtered=placesMapFilter==='All'
-    ? trip.places
-    : trip.places.filter(function(p){return (p.type||'📍 Other')===placesMapFilter;});
-
-  if(!filtered.length){
-    if(placeholder){ placeholder.style.display='flex'; placeholder.querySelector&&(placeholder.innerHTML='<div style="font-size:13px;color:var(--muted)">No places match this filter.</div>'); }
-    iframe.style.display='none';
-    if(legend) legend.innerHTML='<div style="font-size:11px;color:var(--muted);padding:8px">No places match this filter.</div>';
-    if(statusEl) statusEl.textContent='';
-    return;
-  }
-
-  if(statusEl) statusEl.textContent='Locating '+filtered.length+' place'+(filtered.length!==1?'s':'')+'…';
-  if(legend) legend.innerHTML='<div style="font-size:11px;color:var(--muted);padding:8px;font-style:italic">Loading…</div>';
-
-  // Geocode all filtered places
-  const geocoded=[];
-  for(var i=0;i<filtered.length;i++){
-    try{
-      const result=await geocodeStop(filtered[i]);
-      if(result&&result.lat&&result.lon){
-        geocoded.push({place:filtered[i],idx:i,lat:result.lat,lon:result.lon});
-      }
-    }catch(e){ console.warn('Geocode failed:',filtered[i].name,e); }
-  }
-
-  // Build legend regardless of geocode results
-  if(legend){
-    legend.innerHTML='';
-    filtered.forEach(function(p,i){
-      const found=geocoded.find(function(g){return g.idx===i;});
-      const item=document.createElement('div');
-      item.className='places-map-legend-item';
-      const num=document.createElement('div');
-      num.className='places-map-legend-num';
-      num.style.background=found?'var(--suggest)':'var(--muted)';
-      num.textContent=i+1;
-      const info=document.createElement('div');
-      info.className='places-map-legend-info';
-      const name=document.createElement('div');
-      name.className='places-map-legend-name';
-      name.textContent=p.name;
-      name.style.opacity=found?'1':'0.45';
-      name.title=found?'':'No location data — add city and country';
-      const sub=document.createElement('div');
-      sub.className='places-map-legend-sub';
-      sub.textContent=[p.type,p.destination].filter(Boolean).join(' · ')||'';
-      info.appendChild(name);
-      info.appendChild(sub);
-      item.appendChild(num);
-      item.appendChild(info);
-      legend.appendChild(item);
-    });
-  }
-
-  const failCount=filtered.length-geocoded.length;
-  if(statusEl){
-    statusEl.textContent=geocoded.length+' of '+filtered.length+' located'+(failCount?' ('+failCount+' need location data)':'');
-  }
-
-  if(!geocoded.length){
-    if(placeholder){ placeholder.style.display='flex'; placeholder.innerHTML='<div style="font-size:13px;color:var(--muted);text-align:center;padding:20px">No places could be located.<br><span style=\"font-size:11px\">Add city, province, and country to each place.</span></div>'; }
-    iframe.style.display='none';
-    return;
-  }
-
-  const mapHtml=buildPlacesMapHtml(geocoded);
-  if(mapHtml){
-    // srcdoc is the most reliable approach — works on GitHub Pages regardless of CSP,
-    // no blob URL needed, Leaflet still runs in its own isolated document context
-    try{
-      iframe.srcdoc=mapHtml;
-      iframe.style.display='block';
-      if(placeholder) placeholder.style.display='none';
-    }catch(e){
-      // srcdoc failed — try blob URL as fallback
-      try{
-        const blob=new Blob([mapHtml],{type:'text/html'});
-        const url=URL.createObjectURL(blob);
-        iframe.src=url;
-        iframe.style.display='block';
-        if(placeholder) placeholder.style.display='none';
-        setTimeout(function(){try{URL.revokeObjectURL(url);}catch(_){}},30000);
-      }catch(e2){
-        console.warn('Both srcdoc and blob URL failed:',e2);
-      }
-    }
-  }
-}
 
 
 // ═══════════════════════════════════════════
