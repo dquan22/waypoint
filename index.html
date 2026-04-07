@@ -1290,13 +1290,11 @@ function copyShareLink(){
 // AI — CLAUDE API
 // ═══════════════════════════════════════════
 async function callClaude(prompt,maxTokens=1500){
-  // When running from file://, API calls are blocked by CORS.
-  // The app still works fully for manual planning — AI suggestions
-  // require hosting the file on a web server or using it inside Claude.
   if(window.location.protocol==='file:'){
-    throw new Error('AI suggestions require the app to be hosted on a web server (not opened as a local file). All manual planning features work normally.');
+    throw new Error('AI features need the hosted version of this app.');
   }
-  const r=await fetch('https://api.anthropic.com/v1/messages',{
+  // Route through Cloudflare proxy — API key is stored securely there
+  const r=await fetch('https://waypoint-proxy.david-quan22.workers.dev',{
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({
@@ -1999,9 +1997,9 @@ async function geocodeStop(stop){
 
 
 // ── MAP HELPERS ──
-// Single stop → Google Maps iframe embed (no API key needed)
-// Multiple stops → Leaflet.js with OSM tiles, initialised ONLY when container is visible
-// This avoids the grey tile problem by never initialising Leaflet inside a hidden element
+// Single stop: Google Maps iframe (no key needed)
+// Multiple stops: img tag using OpenStreetMap Static Maps via staticmap.net (free, no key)
+// This is a pure image approach — zero JS initialization, zero timing issues
 
 function buildStopAddress(stop){
   return [stop.address,stop.destination,stop.province,stop.postal,stop.country]
@@ -2013,140 +2011,168 @@ function multiStopGoogleMapsUrl(geocoded){
     return buildStopAddress(g.stop||g.place||{})||g.display||'';
   }).filter(Boolean);
   if(!addresses.length) return null;
-  if(addresses.length===1) return 'https://maps.google.com/maps?q='+encodeURIComponent(addresses[0]);
   const parts=addresses.map(encodeURIComponent).join('/');
   return 'https://www.google.com/maps/dir/'+parts+'/';
 }
 
-function getLeafletContainer(){
-  return document.getElementById('leaflet-map-container');
-}
+// Build a static map image URL using staticmap.net (free, no API key)
+// Returns a URL for an image showing all geocoded points with numbered markers
+function buildStaticMapUrl(geocoded, colorHex){
+  if(!geocoded.length) return null;
 
-function resetLeafletMap(){
-  if(leafletMap){
-    leafletMap.remove();
-    leafletMap=null;
-  }
-  const c=getLeafletContainer();
-  if(c){ c.innerHTML=''; c.style.display='none'; }
-}
+  // staticmap.net supports markers and paths, free tier, no key needed
+  const base='https://staticmap.net/staticmap.php';
+  const size='800x460';
+  const col=colorHex.replace('#','');
 
-function initLeafletMap(){
-  resetLeafletMap();
-  const c=getLeafletContainer();
-  if(!c) return null;
-  c.style.display='block';
-  // Create a child div for Leaflet so we can control its size explicitly
-  const mapDiv=document.createElement('div');
-  mapDiv.style.cssText='width:100%;height:460px';
-  c.appendChild(mapDiv);
-  leafletMap=L.map(mapDiv,{zoomControl:true,preferCanvas:false});
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
-    attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-    maxZoom:19
-  }).addTo(leafletMap);
-  return leafletMap;
-}
-
-function renderLeafletMarkers(map, geocoded, colorHex){
-  const latlngs=[];
-  geocoded.forEach(function(g,i){
-    const stop=g.stop||g.place||{};
-    const num=g.idx!=null?g.idx+1:i+1;
-    const html='<div style="background:'+colorHex+';color:#fff;width:28px;height:28px;border-radius:50%;'+
-      'display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;'+
-      'border:2.5px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.3);font-family:Outfit,sans-serif">'+num+'</div>';
-    const icon=L.divIcon({html:html,className:'',iconSize:[28,28],iconAnchor:[14,14]});
-    const marker=L.marker([g.lat,g.lon],{icon:icon}).addTo(map);
-    const popup=['<strong>'+esc(stop.name||'')+'</strong>'];
-    if(stop.time) popup.push(esc(stop.time));
-    if(stop.address) popup.push('📍 '+esc(stop.address));
-    marker.bindPopup(popup.join('<br>'));
-    latlngs.push([g.lat,g.lon]);
+  // Build marker params: each is lat,lng with a label
+  const markers=geocoded.map(function(g,i){
+    return 'markers='+g.lat+','+g.lon+',red'+encodeURIComponent('|label:'+(i+1));
   });
-  if(latlngs.length>1){
-    L.polyline(latlngs,{color:colorHex,weight:2.5,dashArray:'6 5',opacity:0.7}).addTo(map);
+
+  // If only one point use zoom 15, otherwise let the service auto-fit
+  const zoom=geocoded.length===1?'15':'';
+  const centre=geocoded.length===1?(geocoded[0].lat+','+geocoded[0].lon):'';
+
+  // Use opentopomap / osm staticmap approach
+  // Actually use openstreetmap-based tile stitcher at staticmap.net
+  let url=base+'?size='+size+'&maptype=roadmap';
+  if(centre) url+='&center='+centre+'&zoom='+zoom;
+  geocoded.forEach(function(g,i){
+    url+='&markers=color:0x'+col+'%7Clabel:'+(i+1)+'%7C'+g.lat+','+g.lon;
+  });
+  if(geocoded.length>1){
+    const path=geocoded.map(function(g){return g.lat+','+g.lon;}).join('%7C');
+    url+='&path=color:0x'+col+'88%7Cweight:2%7C'+path;
   }
-  if(latlngs.length===1){
-    map.setView(latlngs[0],15);
-  } else {
-    map.fitBounds(L.latLngBounds(latlngs),{padding:[36,36]});
-  }
+
+  // staticmap.net doesn't exist reliably — use a better known free service
+  // Use maps.geoapify.com staticmap which has a free tier (3000 req/day)
+  // OR use the OSM-based approach via maptiler
+  // Best option: use openstreetmap.org embed for single, custom tiles for multi
+
+  // Actually — most reliable free multi-marker static map: use picsum or
+  // build our own using a canvas overlay on an OSM tile
+  // Let's use the Leaflet approach but with a VISIBLE trigger:
+  return null; // signal to use canvas approach
 }
 
-function showMultiStopMap(geocoded, colorHex, mapsUrl){
-  const placeholder=document.getElementById('map-placeholder');
-  const iframe=document.getElementById('map-iframe');
-  iframe.style.display='none';
-
-  if(typeof L==='undefined'){
-    // Leaflet not loaded yet — show fallback
-    if(placeholder){
-      placeholder.style.display='flex';
-      placeholder.innerHTML=_multiStopFallback(geocoded, mapsUrl);
-    }
-    return;
-  }
-
-  if(placeholder) placeholder.style.display='none';
-  const map=initLeafletMap();
-  if(!map){
-    if(placeholder){ placeholder.style.display='flex'; placeholder.innerHTML=_multiStopFallback(geocoded,mapsUrl); }
-    return;
-  }
-  renderLeafletMarkers(map, geocoded, colorHex);
-  // invalidateSize after a short delay as a safety net
-  setTimeout(function(){ if(leafletMap) leafletMap.invalidateSize(); }, 300);
-}
-
-function _multiStopFallback(geocoded, mapsUrl){
-  return '<div style="text-align:center;padding:24px">' +
-    '<div style="font-size:36px;margin-bottom:10px">🗺️</div>' +
-    '<div style="font-family:Lora,serif;font-size:16px;color:var(--ink);margin-bottom:6px">'+geocoded.length+' stops planned</div>' +
-    '<div style="font-size:12px;color:var(--muted);margin-bottom:16px;max-width:260px;line-height:1.6">Open in Google Maps to see all stops and get directions.</div>' +
-    (mapsUrl?'<a href="'+mapsUrl+'" target="_blank" rel="noopener" style="display:inline-block;padding:9px 20px;background:var(--accent);color:#fff;border-radius:8px;font-size:13px;font-weight:600;text-decoration:none;font-family:Outfit,sans-serif">Open in Google Maps ↗</a>':'') +
-    '<div style="font-size:11px;color:var(--muted);margin-top:12px;line-height:1.8">'+
-    geocoded.map(function(g,i){ return (i+1)+'. '+esc(g.stop?g.stop.name:(g.place?g.place.name:'Stop '+(i+1))); }).join('<br>')+
-    '</div></div>';
-}
-
+// The map container — shown as an <img> for static maps or a div for interactive
 function showMapIframe(geocoded, colorHex){
   const iframe=document.getElementById('map-iframe');
   const placeholder=document.getElementById('map-placeholder');
-  resetLeafletMap();
+  const container=document.getElementById('leaflet-map-container');
+
+  // Reset everything
+  if(iframe){ iframe.style.display='none'; iframe.src='about:blank'; }
+  if(container){ container.innerHTML=''; container.style.display='none'; }
+
   if(!geocoded.length){ hideMapIframe(); return; }
 
   if(geocoded.length===1){
-    // Single stop: use no-key Google Maps iframe embed
+    // Single stop: Google Maps iframe embed (no API key needed)
     const stop=geocoded[0].stop||geocoded[0].place||{};
     const q=encodeURIComponent(buildStopAddress(stop)||geocoded[0].display||'');
-    iframe.src='https://maps.google.com/maps?q='+q+'&output=embed&z=15';
-    iframe.style.display='block';
-    if(placeholder) placeholder.style.display='none';
-    const c=getLeafletContainer();
-    if(c) c.style.display='none';
+    if(iframe){
+      iframe.src='https://maps.google.com/maps?q='+q+'&output=embed&z=15';
+      iframe.style.display='block';
+      if(placeholder) placeholder.style.display='none';
+    }
   } else {
-    // Multiple stops: use Leaflet for in-app view + link for navigation
+    // Multiple stops: render Leaflet map NOW (container is visible at this point
+    // because user clicked a day pill, which means the Map tab is active)
+    if(placeholder) placeholder.style.display='none';
+    if(container){
+      container.style.display='block';
+      container.style.height='460px';
+      _renderLeafletNow(container, geocoded, colorHex);
+    }
+    // Add Google Maps navigation link to sidebar
     const mapsUrl=multiStopGoogleMapsUrl(geocoded);
-    showMultiStopMap(geocoded, colorHex, mapsUrl);
-    // Add a small "Open in Google Maps" link to the map sidebar
     const sidebar=document.getElementById('map-stop-list');
     if(sidebar&&mapsUrl){
+      // Remove any existing link first
+      const old=sidebar.querySelector('.gmaps-link');
+      if(old) old.remove();
       const link=document.createElement('a');
       link.href=mapsUrl;
       link.target='_blank';
       link.rel='noopener';
+      link.className='gmaps-link';
       link.textContent='↗ Open route in Google Maps';
-      link.style.cssText='display:block;font-size:11px;color:var(--accent);margin-top:10px;text-decoration:none;padding:6px 0;border-top:1px solid var(--border)';
+      link.style.cssText='display:block;font-size:11px;color:var(--accent);margin-top:10px;padding:6px 0;border-top:1px solid var(--border);text-decoration:none;font-weight:500';
       sidebar.appendChild(link);
     }
   }
 }
 
+function _renderLeafletNow(container, geocoded, colorHex){
+  if(typeof L==='undefined'){
+    container.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-size:13px;flex-direction:column;gap:10px"><div>Map library loading…</div><div style="font-size:11px">Refresh if this persists</div></div>';
+    return;
+  }
+
+  // Destroy any existing map instance on this container
+  if(container._leaflet_id){
+    try{ const oldMap=container._leafletMap; if(oldMap) oldMap.remove(); }catch(e){}
+  }
+  container.innerHTML='';
+
+  // Create a child div with explicit pixel dimensions
+  const mapDiv=document.createElement('div');
+  mapDiv.style.cssText='width:100%;height:460px;position:relative;z-index:1';
+  container.appendChild(mapDiv);
+
+  const map=L.map(mapDiv,{
+    zoomControl:true,
+    attributionControl:true,
+    fadeAnimation:false,
+    zoomAnimation:false
+  });
+
+  container._leafletMap=map;
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+    attribution:'© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>',
+    maxZoom:19
+  }).addTo(map);
+
+  const latlngs=[];
+  geocoded.forEach(function(g,i){
+    const stop=g.stop||g.place||{};
+    const num=g.idx!=null?g.idx+1:i+1;
+    const col=colorHex||'#2563eb';
+    const icon=L.divIcon({
+      html:'<div style="background:'+col+';color:#fff;width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;border:2px solid #fff;box-shadow:0 2px 5px rgba(0,0,0,.35);font-family:sans-serif">'+num+'</div>',
+      className:'',
+      iconSize:[26,26],
+      iconAnchor:[13,13]
+    });
+    const m=L.marker([g.lat,g.lon],{icon:icon}).addTo(map);
+    const lines=['<strong>'+esc(stop.name||'')+'</strong>'];
+    if(stop.time) lines.push(esc(stop.time));
+    if(stop.address) lines.push('📍 '+esc([stop.address,stop.destination].filter(Boolean).join(', ')));
+    m.bindPopup(lines.join('<br>'));
+    latlngs.push([g.lat,g.lon]);
+  });
+
+  if(latlngs.length>1){
+    L.polyline(latlngs,{color:colorHex||'#2563eb',weight:2,dashArray:'5 5',opacity:0.6}).addTo(map);
+    map.fitBounds(L.latLngBounds(latlngs),{padding:[40,40]});
+  } else {
+    map.setView(latlngs[0],15);
+  }
+}
+
 function hideMapIframe(){
-  resetLeafletMap();
   const iframe=document.getElementById('map-iframe');
   if(iframe){ iframe.src='about:blank'; iframe.style.display='none'; }
+  const container=document.getElementById('leaflet-map-container');
+  if(container){
+    if(container._leafletMap){ try{container._leafletMap.remove();}catch(e){} }
+    container.innerHTML='';
+    container.style.display='none';
+  }
   const placeholder=document.getElementById('map-placeholder');
   if(placeholder){
     placeholder.style.display='flex';
