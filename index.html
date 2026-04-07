@@ -331,6 +331,35 @@ input,select,textarea{font-family:'Outfit',sans-serif}
 .btn-commute{padding:4px 10px;border:1px solid var(--border2);border-radius:6px;background:var(--paper3);font-size:11px;color:var(--muted);cursor:pointer;transition:all .12s;font-family:'Outfit',sans-serif}
 .btn-commute:hover{border-color:var(--accent);color:var(--accent)}
 
+
+/* ── PLACES CAROUSEL ── */
+.places-carousel-wrap{overflow-x:auto;padding:4px 0 12px;margin-bottom:16px;scrollbar-width:thin;scrollbar-color:var(--border2) transparent}
+.places-carousel-wrap::-webkit-scrollbar{height:5px}
+.places-carousel-wrap::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+.places-carousel{display:grid;grid-template-rows:1fr 1fr;grid-auto-flow:column;grid-auto-columns:240px;gap:10px;width:max-content;min-width:100%}
+.places-carousel .place-card{width:240px;min-height:0}
+/* ── PLACES MAP ── */
+.places-map-section{background:var(--paper3);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden}
+.places-map-header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border)}
+.places-map-status{font-size:12px;color:var(--muted)}
+.places-map-wrap{display:grid;grid-template-columns:200px 1fr;height:440px}
+.places-map-legend{overflow-y:auto;border-right:1px solid var(--border);padding:10px 8px}
+.places-map-legend-item{display:flex;align-items:flex-start;gap:7px;padding:5px 4px;border-radius:6px;cursor:pointer;transition:background .12s;margin-bottom:2px}
+.places-map-legend-item:hover{background:var(--paper2)}
+.places-map-legend-num{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0;margin-top:1px}
+.places-map-legend-info{min-width:0}
+.places-map-legend-name{font-size:12px;font-weight:500;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.places-map-legend-sub{font-size:11px;color:var(--muted)}
+.places-map-frame{position:relative;background:var(--paper2)}
+.places-map-placeholder{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px}
+@media(max-width:640px){
+  .places-carousel{grid-auto-columns:200px}
+  .places-carousel .place-card{width:200px}
+  .places-map-wrap{grid-template-columns:1fr;height:auto}
+  .places-map-legend{height:160px;border-right:none;border-bottom:1px solid var(--border)}
+  .places-map-frame{height:300px}
+}
+
 </style>
 </head>
 <body>
@@ -423,7 +452,6 @@ input,select,textarea{font-family:'Outfit',sans-serif}
     <div class="tab-bar">
       <button class="tab active" data-tab="itinerary" onclick="switchTab('itinerary',this)">📋 Itinerary</button>
       <button class="tab" data-tab="places" onclick="switchTab('places',this)">📌 Places</button>
-      <button class="tab" data-tab="map" onclick="switchTab('map',this)">🗺 Map</button>
       <button class="tab" data-tab="csv" onclick="switchTab('csv',this)">📂 Import CSV</button>
     </div>
 
@@ -442,17 +470,16 @@ input,select,textarea{font-family:'Outfit',sans-serif}
 
     <div class="tab-content" id="tab-places">
 
+      <!-- Toolbar: count + filters + add button -->
       <div class="places-toolbar">
-        <div>
-          <div style="font-weight:600;font-size:15px;margin-bottom:3px">Places &amp; Points of Interest</div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex:1">
           <div class="places-count" id="places-count">0 places saved</div>
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
           <div class="places-filter" id="places-filter"></div>
-          <button class="btn-outline" onclick="toggleAddPlaceForm()">+ Add place</button>
         </div>
+        <button class="btn-outline" onclick="toggleAddPlaceForm()">+ Add place</button>
       </div>
 
+      <!-- Add place form (hidden by default) -->
       <div class="add-place-form" id="add-place-form">
         <div class="add-place-title">Add a new place</div>
         <div class="add-row add-row-3" style="margin-bottom:9px">
@@ -476,52 +503,36 @@ input,select,textarea{font-family:'Outfit',sans-serif}
         </div>
       </div>
 
-      <div class="places-grid" id="places-grid">
-        <div class="places-empty">
-          <div class="places-empty-icon">📌</div>
-          <div class="places-empty-text">No places saved yet.<br>Add places here to build a list of potential stops,<br>then move them into days when you're ready.</div>
-        </div>
-      </div>
-
-    </div>
-
-    <div class="tab-content" id="tab-map">
-
-      <!-- Mode toggle -->
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
-        <div style="display:flex;gap:2px;background:var(--paper2);border:1px solid var(--border);border-radius:var(--radius);padding:3px">
-          <button class="tab active" id="map-mode-days" onclick="setMapMode('days',this)" style="padding:6px 16px;font-size:12px">📅 By day</button>
-          <button class="tab" id="map-mode-places" onclick="setMapMode('places',this)" style="padding:6px 16px;font-size:12px">📌 Places</button>
-        </div>
-        <!-- Day pills (shown in days mode) -->
-        <div id="map-day-controls" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <span class="map-ctrl-label">Day:</span>
-          <div id="map-day-pills" style="display:flex;gap:6px;flex-wrap:wrap"></div>
-        </div>
-        <!-- Type filter pills (shown in places mode) -->
-        <div id="map-places-controls" style="display:none;align-items:center;gap:8px;flex-wrap:wrap">
-          <span class="map-ctrl-label">Type:</span>
-          <div id="map-places-filter" style="display:flex;gap:6px;flex-wrap:wrap"></div>
-        </div>
-      </div>
-
-      <div class="map-layout">
-        <div class="map-sidebar">
-          <div class="map-sb-label" id="map-sb-label">Stops</div>
-          <div id="map-stop-list"><p style="font-size:12px;color:var(--muted)">Select a day above.</p></div>
-        </div>
-        <div class="map-frame-wrap" style="position:relative" id="map-frame-wrap">
-          <div class="map-placeholder" id="map-placeholder">
-            <div class="map-placeholder-icon">🗺️</div>
-            <div class="map-placeholder-title">Map view</div>
-            <div class="map-placeholder-sub" id="map-placeholder-sub">Select a day to see stops on the map.</div>
+      <!-- Two-row horizontal carousel of place cards -->
+      <div class="places-carousel-wrap">
+        <div class="places-carousel" id="places-carousel">
+          <div class="places-empty" style="grid-column:1/-1">
+            <div class="places-empty-icon">📌</div>
+            <div class="places-empty-text">No places saved yet.<br>Add places to see them on the map below.</div>
           </div>
-          <!-- Static map image — works for any number of stops, no JS init needed -->
-          <img id="map-static-img" style="width:100%;height:460px;display:none;object-fit:cover;border-radius:var(--radius-lg)" alt="Map" />
-          <!-- Single-location Google Maps embed (no API key) -->
-          <iframe id="map-iframe" style="width:100%;height:460px;display:none;border:none;border-radius:var(--radius-lg)" allowfullscreen loading="lazy"></iframe>
         </div>
       </div>
+
+      <!-- Places map section -->
+      <div class="places-map-section" id="places-map-section">
+        <div class="places-map-header">
+          <div style="font-weight:600;font-size:13px;color:var(--ink2)">📍 Places on map</div>
+          <div class="places-map-status" id="places-map-status"></div>
+        </div>
+        <div class="places-map-wrap">
+          <div class="places-map-legend" id="places-map-legend">
+            <div style="font-size:11px;color:var(--muted);padding:8px">Select a filter or add places to see them on the map.</div>
+          </div>
+          <div class="places-map-frame">
+            <div class="places-map-placeholder" id="places-map-placeholder">
+              <div style="font-size:32px;margin-bottom:8px">🗺️</div>
+              <div style="font-size:13px;color:var(--muted)">Add places with location data to see them here.</div>
+            </div>
+            <iframe id="places-map-iframe" style="width:100%;height:100%;border:none;display:none;border-radius:var(--radius-lg)" loading="lazy"></iframe>
+          </div>
+        </div>
+      </div>
+
     </div>
 
     <div class="tab-content" id="tab-csv">
@@ -658,9 +669,6 @@ const TYPE_ICONS={'🏛️ Attraction':'🏛️','🍽️ Food':'🍽️','🍸 
 
 let trip=null;
 let editTarget=null;
-let activeMapDay=null;
-let mapMode='days';
-let mapPlacesFilter='All';
 let csvRaw=null;
 let autoSaveTimer=null;
 
@@ -756,9 +764,6 @@ function switchTab(name,btn){
     const el=document.getElementById('tab-'+name);
     if(el) el.classList.add('active');
     else console.error('switchTab: tab content not found for', name);
-    if(name==='map'){
-      renderMapView();
-    }
     if(name==='places') renderPlaces();
   }catch(err){console.error('switchTab error:',err);}
 }
@@ -776,7 +781,7 @@ document.querySelectorAll('.modal-bg').forEach(m=>{
 // HOME SCREEN
 // ═══════════════════════════════════════════
 function goHome(){
-  trip=null; activeMapDay=null; mapMode='days'; mapPlacesFilter='All';
+  trip=null;
   document.getElementById('h-trip-name').textContent='';
   document.getElementById('h-collab-badge').style.display='none';
   document.getElementById('hbtn-home').style.display='none';
@@ -1011,7 +1016,6 @@ function renderPlanner(){
     pills.push(`<span class="pill">✦ ${trip.notes.slice(0,50)}${trip.notes.length>50?'…':''}</span>`);
   document.getElementById('p-pills').innerHTML=pills.join('');
   renderDays();
-  renderMapPills();
   document.getElementById('global-suggest-wrap').style.display='block';
 }
 
@@ -1044,6 +1048,7 @@ function buildDayBlock(di){
         <button class="action-btn" onclick="openAddForm(${di})">+ Add stop</button>
         <button class="action-btn" style="border-color:#ddd6fe;color:var(--suggest)" onclick="openSuggestPicker(${di})">✦ Suggest</button>
         <button class="action-btn" id="commute-btn-${di}" style="border-color:#a7f3d0;color:#065f46" onclick="getCommuteTimes(${di})">🚗 Commute</button>
+        <button class="action-btn" style="border-color:#bfdbfe;color:#1d4ed8" onclick="openDayRoute(${di})">↗ Route</button>
       </div>
     </div>
     <div class="stops-list" id="stops-${di}"></div>
@@ -1642,715 +1647,302 @@ function addSuggestion(item,di){
 // ═══════════════════════════════════════════
 // MAP
 // ═══════════════════════════════════════════
-function setMapMode(mode, btn){
-  mapMode = mode;
-  // Toggle mode button styles
-  document.querySelectorAll('#map-mode-days, #map-mode-places').forEach(function(b){
-    b.classList.toggle('active', b.id === 'map-mode-'+mode);
-  });
-  // Show/hide correct controls
-  const dayCtrl = document.getElementById('map-day-controls');
-  const placesCtrl = document.getElementById('map-places-controls');
-  if(dayCtrl) dayCtrl.style.display = mode==='days' ? 'flex' : 'none';
-  if(placesCtrl) placesCtrl.style.display = mode==='places' ? 'flex' : 'none';
-  // Update sidebar label
-  const lbl = document.getElementById('map-sb-label');
-  if(lbl) lbl.textContent = mode==='days' ? 'Stops' : 'Places';
-  renderMapView();
-}
+function openSuggestPicker(di){
+  const el=document.getElementById('day-suggest-'+di);
+  if(!el) return;
 
-function renderMapPills(){
-  const c=document.getElementById('map-day-pills');
-  if(!c||!trip)return;
-  c.innerHTML='';
-  trip.days.forEach(function(day,di){
-    const color=dc(di);
-    const btn=document.createElement('button');
-    btn.className='day-map-pill'+(activeMapDay===di?' active':'');
-    if(activeMapDay===di) btn.style.background=color;
-    btn.textContent='Day '+day.day;
-    btn.onclick=function(){ activeMapDay=di; renderMapView(); };
-    c.appendChild(btn);
-  });
-}
+  // If already showing results, toggle off
+  if(el.dataset.mode==='results'){
+    el.innerHTML='';
+    el.dataset.mode='';
+    return;
+  }
 
-function renderMapPlacesFilter(){
-  if(!trip||!trip.places) return;
-  const c = document.getElementById('map-places-filter');
-  if(!c) return;
-  const types = ['All', ...new Set(trip.places.map(function(p){ return p.type||'📍 Other'; }))];
-  c.innerHTML='';
+  // If picker already open, close it
+  if(el.dataset.mode==='picker'){
+    el.innerHTML='';
+    el.dataset.mode='';
+    return;
+  }
+
+  el.dataset.mode='picker';
+  const types=Object.keys(TYPE_ICONS);
+  const selected=suggestPickerState[di]||null;
+
+  const picker=document.createElement('div');
+  picker.className='suggest-type-picker';
+
+  const title=document.createElement('div');
+  title.className='suggest-type-picker-title';
+  title.textContent='What type of place are you looking for?';
+  picker.appendChild(title);
+
+  const grid=document.createElement('div');
+  grid.className='suggest-type-grid';
+
   types.forEach(function(t){
     const btn=document.createElement('button');
-    btn.className='day-map-pill'+(mapPlacesFilter===t?' active':'');
-    if(mapPlacesFilter===t) btn.style.background='var(--suggest)';
+    btn.className='suggest-type-btn'+(selected===t?' selected':'');
     btn.textContent=t;
-    btn.onclick=function(){ mapPlacesFilter=t; renderMapView(); };
-    c.appendChild(btn);
+    btn.onclick=function(){
+      grid.querySelectorAll('.suggest-type-btn').forEach(function(b){ b.classList.remove('selected'); });
+      btn.classList.add('selected');
+      suggestPickerState[di]=t;
+      runBtn.disabled=false;
+    };
+    grid.appendChild(btn);
   });
+  picker.appendChild(grid);
+
+  const confirmRow=document.createElement('div');
+  confirmRow.className='suggest-type-confirm';
+
+  const runBtn=document.createElement('button');
+  runBtn.className='btn-run-suggest';
+  runBtn.textContent='Get suggestions';
+  runBtn.disabled=!selected;
+  runBtn.onclick=function(){ runDaySuggestions(di); };
+
+  const dismissBtn=document.createElement('button');
+  dismissBtn.className='btn-dismiss-suggest';
+  dismissBtn.textContent='Cancel';
+  dismissBtn.onclick=function(){ el.innerHTML=''; el.dataset.mode=''; };
+
+  confirmRow.appendChild(runBtn);
+  confirmRow.appendChild(dismissBtn);
+  picker.appendChild(confirmRow);
+
+  el.innerHTML='';
+  el.appendChild(picker);
 }
 
-function renderMapView(){
-  if(!trip) return;
-  if(mapMode==='places'){
-    renderMapPlacesView();
-  } else {
-    renderMapDaysView();
-  }
-}
+async function runDaySuggestions(di){
+  const el=document.getElementById('day-suggest-'+di);
+  if(!el) return;
+  const selectedType=suggestPickerState[di];
+  if(!selectedType){ toast('Pick a type first'); return; }
 
-function renderMapDaysView(){
-  renderMapPills();
-  const listEl=document.getElementById('map-stop-list');
-  listEl.innerHTML='';
+  el.dataset.mode='results';
+  el.innerHTML='<div class="suggest-loading" style="padding:14px 0"><div class="suggest-spinner"></div>Finding the best '+selectedType+' options nearby…</div>';
 
-  if(activeMapDay===null){
-    hideLeafletMap();
-    (document.getElementById('map-placeholder-sub')||{}).textContent='Select a day to see stops on the map.';
-    listEl.innerHTML='<p style="font-size:12px;color:var(--muted)">Select a day above.</p>';
-    return;
-  }
+  const day=trip.days[di];
+  const dests=trip.destinations&&trip.destinations.length?trip.destinations.join(', '):'the destination';
 
-  const day=trip.days[activeMapDay];
-  const color=dc(activeMapDay);
+  // Build a rich stop context so AI can reason about proximity
+  const stopContext=day.stops.length
+    ? day.stops.map(function(s,i){
+        const loc=[s.name,s.address,s.destination,s.province,s.country].filter(Boolean).join(', ');
+        return (i+1)+'. '+loc+' ['+( s.type||'stop')+']';
+      }).join('\n')
+    : 'No stops yet — use trip destinations as reference: '+dests;
 
-  if(!day.stops.length){
-    hideLeafletMap();
-    (document.getElementById('map-placeholder-sub')||{}).textContent='No stops on Day '+day.day+' yet.';
-    listEl.innerHTML='<p style="font-size:12px;color:var(--muted)">No stops on this day.</p>';
-    return;
-  }
+  const prompt=`You are an expert travel advisor recommending ${selectedType} options for a traveller.
 
-  day.stops.forEach(function(s,si){
-    const row=document.createElement('div');
-    row.className='map-stop-row';
-    const numEl=document.createElement('div');
-    numEl.className='map-stop-num';
-    numEl.style.background=color;
-    numEl.textContent=si+1;
-    const infoEl=document.createElement('div');
-    const nameEl=document.createElement('div');
-    nameEl.className='map-stop-name';
-    nameEl.textContent=s.name;
-    infoEl.appendChild(nameEl);
-    if(s.time){
-      const timeEl=document.createElement('div');
-      timeEl.className='map-stop-time';
-      timeEl.textContent=s.time;
-      infoEl.appendChild(timeEl);
-    }
-    if(s.destination){
-      const destEl=document.createElement('div');
-      destEl.className='map-stop-time';
-      destEl.style.color='var(--accent2)';
-      destEl.textContent=s.destination;
-      infoEl.appendChild(destEl);
-    }
-    row.appendChild(numEl);
-    row.appendChild(infoEl);
-    listEl.appendChild(row);
-  });
+TRIP: "${trip.name}" — ${dests}
+DAY ${day.day} STOPS ALREADY PLANNED:
+${stopContext}
 
-  showMapForDay(activeMapDay,day);
-}
+TASK: Suggest up to 5 ${selectedType} options for Day ${day.day}.
 
-async function renderMapPlacesView(){
-  renderMapPlacesFilter();
-  if(!trip.places) trip.places=[];
-  const listEl=document.getElementById('map-stop-list');
-  listEl.innerHTML='';
+Mix your recommendations as follows:
+- 2 options prioritising PROXIMITY: walking distance or very close to the existing stops, convenient to visit between them. Label these with priority "nearby".
+- 2 options prioritising QUALITY: highly rated, well reviewed, or locally acclaimed — within driving distance of the day's stops even if not walking distance. Label these with priority "rated".
+- 1 wildcard: your personal top pick balancing both. Label as "rated".
 
-  // Apply type filter
-  const filtered = mapPlacesFilter==='All'
-    ? trip.places
-    : trip.places.filter(function(p){ return (p.type||'📍 Other')===mapPlacesFilter; });
+For each suggestion include:
+- Real, specific place names (not generic descriptions)
+- Realistic addresses in the correct city
+- A concise reason covering why it fits this day's stops geographically and/or why it's worth visiting
+- An estimated distance or travel context from the nearest day stop (e.g. "5 min walk from X", "10 min drive")
+- A quality signal where relevant (e.g. Michelin recommended, highly rated on Google, local favourite, award-winning)
 
-  if(!filtered.length){
-    iframe.style.display='none';
-    placeholder.style.display='flex';
-    (document.getElementById('map-placeholder-sub')||{}).textContent = trip.places.length
-      ? 'No places match this filter.'
-      : 'No places saved yet — add some in the Places tab.';
-    listEl.innerHTML='<p style="font-size:12px;color:var(--muted)">'+(trip.places.length?'No places match this filter.':'No places saved yet.')+'</p>';
-    return;
-  }
+Return ONLY a valid JSON array, no markdown, no commentary:
+[{
+  "name": "Place Name",
+  "type": "${selectedType}",
+  "priority": "nearby",
+  "destination": "City",
+  "address": "Street address or area",
+  "time": "Suggested visit time e.g. 7:00 PM",
+  "description": "Why it fits this day + quality signal",
+  "distance": "e.g. 5 min walk from Shilin Night Market"
+}]`;
 
-  // Build sidebar list
-  filtered.forEach(function(p,i){
-    const row=document.createElement('div');
-    row.className='map-stop-row';
-    const numEl=document.createElement('div');
-    numEl.className='map-stop-num';
-    numEl.style.background='var(--suggest)';
-    numEl.textContent=i+1;
-    const infoEl=document.createElement('div');
-    const nameEl=document.createElement('div');
-    nameEl.className='map-stop-name';
-    nameEl.textContent=p.name;
-    infoEl.appendChild(nameEl);
-    if(p.type){
-      const typeEl=document.createElement('div');
-      typeEl.className='map-stop-time';
-      typeEl.textContent=p.type;
-      infoEl.appendChild(typeEl);
-    }
-    if(p.destination||p.country){
-      const locEl=document.createElement('div');
-      locEl.className='map-stop-time';
-      locEl.style.color='var(--accent2)';
-      locEl.textContent=[p.destination,p.country].filter(Boolean).join(', ');
-      infoEl.appendChild(locEl);
-    }
-    row.appendChild(numEl);
-    row.appendChild(infoEl);
-    listEl.appendChild(row);
-  });
-
-  // Geocode all filtered places and show on map
-  listEl.insertAdjacentHTML('afterbegin','<p style="font-size:11px;color:var(--muted);padding:4px 0 8px">Geocoding '+filtered.length+' place'+(filtered.length!==1?'s':'')+' — this may take a moment…</p>');
-
-  const geocoded=[];
-  for(var i=0;i<filtered.length;i++){
-    try{
-      const result=await geocodeStop(filtered[i]);
-      // Only push if we got a valid lat/lon back — never let one failure stop the loop
-      if(result && result.lat && result.lon){
-        geocoded.push({place:filtered[i], idx:i, lat:result.lat, lon:result.lon, display:result.display});
-      }
-    }catch(e){
-      // Swallow individual geocode errors so other places still render
-      console.warn('Geocode failed for place:', filtered[i].name, e);
-    }
-  }
-
-  // Remove geocoding message
-  const msg=listEl.querySelector('p');
-  if(msg) msg.remove();
-
-  // Mark sidebar entries: dim those that couldn't be located, keep others normal
-  listEl.querySelectorAll('.map-stop-row').forEach(function(row,i){
-    const found=geocoded.find(function(g){return g.idx===i;});
-    const nameEl=row.querySelector('.map-stop-name');
-    if(!found && nameEl){
-      nameEl.style.opacity='0.4';
-      nameEl.title='Location not found — try adding city, province, and country';
-      // Append a small warning badge
-      const badge=document.createElement('span');
-      badge.textContent=' ⚠';
-      badge.style.cssText='font-size:10px;color:var(--warn);';
-      nameEl.appendChild(badge);
-    }
-  });
-
-  // If zero places geocoded show a helpful message but still display the map area
-  if(!geocoded.length){
-    hideLeafletMap();
-    (document.getElementById('map-placeholder-sub')||{}).textContent=
-      filtered.length+' place'+(filtered.length!==1?'s':'')+' could not be located. Add city, province, and country to each place to improve accuracy.';
-    return;
-  }
-
-  // Show partial success note in sidebar if some failed
-  const failedCount=filtered.length-geocoded.length;
-  if(failedCount>0){
-    const note=document.createElement('p');
-    note.style.cssText='font-size:11px;color:var(--warn);padding:6px 0 2px;';
-    note.textContent=failedCount+' place'+(failedCount!==1?'s':'')+' could not be located (shown dimmed).';
-    listEl.insertAdjacentElement('afterbegin',note);
-  }
-
-  showLeafletMap(geocoded, '#7c3aed', function(g,i){ return i+1; });
-}
-
-// Build a freeform geocode query from most specific to least specific.
-// Nominatim handles freeform queries better than structured params
-// when fields like province use abbreviations (BC, ON) or vary in format.
-// Expand common province/state abbreviations to full names
-// so Nominatim can match them reliably
-function expandProvince(raw){
-  if(!raw) return raw;
-  const map={
-    // Canadian provinces
-    'BC':'British Columbia','AB':'Alberta','SK':'Saskatchewan',
-    'MB':'Manitoba','ON':'Ontario','QC':'Quebec','NB':'New Brunswick',
-    'NS':'Nova Scotia','PE':'Prince Edward Island','NL':'Newfoundland and Labrador',
-    'YT':'Yukon','NT':'Northwest Territories','NU':'Nunavut',
-    // US states (common ones)
-    'AL':'Alabama','AK':'Alaska','AZ':'Arizona','AR':'Arkansas','CA':'California',
-    'CO':'Colorado','CT':'Connecticut','DE':'Delaware','FL':'Florida','GA':'Georgia',
-    'HI':'Hawaii','ID':'Idaho','IL':'Illinois','IN':'Indiana','IA':'Iowa',
-    'KS':'Kansas','KY':'Kentucky','LA':'Louisiana','ME':'Maine','MD':'Maryland',
-    'MA':'Massachusetts','MI':'Michigan','MN':'Minnesota','MS':'Mississippi',
-    'MO':'Missouri','MT':'Montana','NE':'Nebraska','NV':'Nevada','NH':'New Hampshire',
-    'NJ':'New Jersey','NM':'New Mexico','NY':'New York','NC':'North Carolina',
-    'ND':'North Dakota','OH':'Ohio','OK':'Oklahoma','OR':'Oregon','PA':'Pennsylvania',
-    'RI':'Rhode Island','SC':'South Carolina','SD':'South Dakota','TN':'Tennessee',
-    'TX':'Texas','UT':'Utah','VT':'Vermont','VA':'Virginia','WA':'Washington',
-    'WV':'West Virginia','WI':'Wisconsin','WY':'Wyoming','DC':'District of Columbia',
-    // Australian states
-    'NSW':'New South Wales','VIC':'Victoria','QLD':'Queensland','WA':'Western Australia',
-    'SA':'South Australia','TAS':'Tasmania','ACT':'Australian Capital Territory','NT':'Northern Territory',
-    // UK
-    'ENG':'England','SCT':'Scotland','WLS':'Wales','NIR':'Northern Ireland'
-  };
-  const upper=raw.trim().toUpperCase();
-  return map[upper]||raw;
-}
-
-// Country aliases for display_name matching
-const COUNTRY_ALIASES={
-  'canada':['canada'],'united states':['united states','usa'],'us':['united states','usa'],
-  'usa':['united states','usa'],'australia':['australia'],'au':['australia'],
-  'united kingdom':['united kingdom'],'uk':['united kingdom'],'gb':['united kingdom'],
-  'japan':['japan'],'thailand':['thailand'],'taiwan':['taiwan'],
-  'france':['france'],'germany':['germany'],'italy':['italy'],
-  'spain':['spain'],'portugal':['portugal'],'netherlands':['netherlands'],
-  'new zealand':['new zealand'],'nz':['new zealand'],'singapore':['singapore'],
-  'indonesia':['indonesia'],'vietnam':['viet nam','vietnam'],
-  'south korea':['south korea','korea'],'china':['china'],'india':['india'],
-};
-
-function matchesCountry(displayName, country){
-  if(!country) return true;
-  const lower=country.toLowerCase().trim();
-  const aliases=COUNTRY_ALIASES[lower]||[lower];
-  const dispLower=displayName.toLowerCase();
-  return aliases.some(a=>dispLower.includes(a));
-}
-
-async function nominatimSearch(query, country){
-  const url='https://nominatim.openstreetmap.org/search?q='+encodeURIComponent(query)+'&format=json&limit=5&addressdetails=1';
-  const r=await fetch(url,{headers:{'User-Agent':'WaypointTravelApp/2.0'}});
-  const data=await r.json();
-  if(!data.length) return null;
-  // If country specified, only accept results that match it
-  if(country){
-    const match=data.find(d=>matchesCountry(d.display_name, country));
-    return match||null;
-  }
-  return data[0];
-}
-
-async function geocodeStop(stop){
-  // Expand abbreviations before querying
-  const province=expandProvince(stop.province);
-  const city=stop.destination||'';
-  const address=stop.address||'';
-  const postal=stop.postal||'';
-  const country=stop.country||'';
-
-  // Strategy: try queries from most to least specific.
-  // Postal codes are excluded from Nominatim queries — they are unreliable
-  // for Canadian/international addresses and cause wrong results.
-  // Instead we use city + province + country as the reliable anchor,
-  // then narrow further with a street address if available.
-  const queries=[];
-
-  if(address && city && province && country)
-    queries.push(address+', '+city+', '+province+', '+country);
-  if(address && city && country)
-    queries.push(address+', '+city+', '+country);
-  if(address && city && province)
-    queries.push(address+', '+city+', '+province);
-  if(address && city)
-    queries.push(address+', '+city);
-  if(city && province && country)
-    queries.push(city+', '+province+', '+country);
-  if(city && country)
-    queries.push(city+', '+country);
-  if(city && province)
-    queries.push(city+', '+province);
-  if(city)
-    queries.push(city);
-
-  // Fallback to trip context if stop has no location data at all
-  if(!queries.length){
-    const fallback=trip.destinations?.[0]||trip.name;
-    if(fallback) queries.push(fallback);
-  }
-
-  // Deduplicate
-  const seen=new Set();
-  const deduped=queries.filter(q=>{
-    const k=q.trim().toLowerCase();
-    if(seen.has(k))return false;
-    seen.add(k);
-    return q.trim().length>0;
-  });
-
-  for(const q of deduped){
-    try{
-      const result=await nominatimSearch(q, country);
-      if(result){
-        console.log('Geocoded "'+q+'" →', result.display_name);
-        return {lat:parseFloat(result.lat), lon:parseFloat(result.lon), display:result.display_name};
-      }
-    }catch(e){ console.warn('Geocode failed for:', q, e); }
-  }
-  return null;
-}
-
-
-
-// ── MAP HELPERS ──
-// Uses static map images — no JavaScript map library, no container sizing issues.
-// Single stop: Google Maps iframe (no API key)
-// Multiple stops: staticmap.de free service returns a PNG image with markers baked in
-// The image is set as an <img> src — renders instantly, works everywhere.
-
-function buildStopAddress(stop){
-  return [stop.address,stop.destination,stop.province,stop.postal,stop.country]
-    .filter(Boolean).join(', ');
-}
-
-function multiStopGoogleMapsUrl(geocoded){
-  const addresses=geocoded.map(function(g){
-    return buildStopAddress(g.stop||g.place||{})||g.display||'';
-  }).filter(Boolean);
-  if(!addresses.length) return null;
-  const parts=addresses.map(encodeURIComponent).join('/');
-  return 'https://www.google.com/maps/dir/'+parts+'/';
-}
-
-// Marker colors for day numbers (hex without #)
-const MARKER_COLORS=['2563eb','059669','7c3aed','d97706','dc2626','0891b2','65a30d'];
-
-function buildStaticMapUrl(geocoded, colorHex){
-  if(!geocoded.length) return null;
-
-  // Use staticmap.de — free OSM-based static map service, no API key needed
-  // Supports multiple colored markers and an auto-fit viewport
-  const col=(colorHex||'#2563eb').replace('#','');
-
-  // For a single stop, simple center+zoom works
-  if(geocoded.length===1){
-    const g=geocoded[0];
-    return 'https://staticmap.de/staticmap.php'
-      +'?center='+g.lat+','+g.lon
-      +'&zoom=15'
-      +'&size=800x460'
-      +'&markers='+g.lat+','+g.lon+',red-pushpin';
-  }
-
-  // For multiple stops, use osm-static-maps.ivanpetrov.dev which supports
-  // multi-marker with auto bounding box
-  // Fallback chain: try multiple free services
-  let url='https://staticmap.de/staticmap.php?size=800x460&maptype=mapnik';
-  geocoded.forEach(function(g,i){
-    url+='&markers='+g.lat+','+g.lon+',ol-marker-gold';
-  });
-  return url;
-}
-
-// Primary: use openrouteservice or similar, fallback to drawing our own
-// Actually most reliable free option: use the Nominatim + tile approach
-// but the BEST zero-config option is to generate an OSM embed URL that works:
-// maps.openrouteservice.org or similar
-
-// Let's use https://maps.geoapify.com/v1/staticmap - free 3000/day
-// OR the simplest: just show a table of stops with a "open in maps" button
-// ACTUALLY: use https://api.bigdatacloud.net -- no wait
-
-// The REAL solution: use OpenStreetMap's own static map export
-// via the tile.openstreetmap.org directly stitched
-// OR: use the simplest possible approach that actually works:
-// embed maps.google.com for single, and for multi use a special
-// Google My Maps export URL that doesn't require an API key
-
-// After extensive testing, the most reliable zero-key multi-marker solution is:
-// Use the uMap OSM service OR generate an HTML page with an embedded map
-// 
-// Actually the cleanest solution: use the free Stadia Maps static API
-// which is free for open source / personal projects
-
-function buildStaticMapUrlWorking(geocoded, colorHex){
-  if(!geocoded.length) return null;
-
-  // Calculate bounding box with padding
-  const lats=geocoded.map(function(g){return parseFloat(g.lat);});
-  const lons=geocoded.map(function(g){return parseFloat(g.lon);});
-  const minLat=Math.min.apply(null,lats);
-  const maxLat=Math.max.apply(null,lats);
-  const minLon=Math.min.apply(null,lons);
-  const maxLon=Math.max.apply(null,lons);
-  const latPad=Math.max(0.008,(maxLat-minLat)*0.35);
-  const lonPad=Math.max(0.008,(maxLon-minLon)*0.35);
-
-  // Use openstreetmap.org/export — this creates a simple tile-based image
-  // For multi-marker we use the OSM-based staticmap service at
-  // https://maps.wikimedia.org/img/ which is free and reliable
-  const bbox=(minLon-lonPad)+'%2C'+(minLat-latPad)+'%2C'+(maxLon+lonPad)+'%2C'+(maxLat+latPad);
-
-  // Wikimedia Maps static image — free, reliable, OSM-based
-  // Format: /img/osm-intl,{zoom},{lat},{lon},{width}x{height}.png
-  const centreLat=((minLat+maxLat)/2).toFixed(6);
-  const centreLon=((minLon+maxLon)/2).toFixed(6);
-
-  // Calculate appropriate zoom level from bounding box
-  const latDiff=maxLat-minLat+latPad*2;
-  const lonDiff=maxLon-minLon+lonPad*2;
-  const maxDiff=Math.max(latDiff,lonDiff);
-  let zoom=14;
-  if(maxDiff>0.5) zoom=11;
-  else if(maxDiff>0.2) zoom=12;
-  else if(maxDiff>0.05) zoom=13;
-  else if(maxDiff>0.01) zoom=14;
-  else zoom=15;
-
-  return 'https://maps.wikimedia.org/img/osm-intl,'+zoom+','+centreLat+','+centreLon+',800x460.png';
-}
-
-function showMapIframe(geocoded, colorHex){
-  const iframe=document.getElementById('map-iframe');
-  const img=document.getElementById('map-static-img');
-  const placeholder=document.getElementById('map-placeholder');
-
-  // Reset all display states
-  if(iframe){iframe.style.display='none';iframe.src='about:blank';}
-  if(img){img.style.display='none';img.src='';}
-
-  if(!geocoded.length){hideMapIframe();return;}
-
-  if(geocoded.length===1){
-    // Single stop: Google Maps iframe embed (no API key needed for basic embed)
-    const stop=geocoded[0].stop||geocoded[0].place||{};
-    const q=encodeURIComponent(buildStopAddress(stop)||geocoded[0].display||'');
-    if(iframe){
-      iframe.src='https://maps.google.com/maps?q='+q+'&output=embed&z=15';
-      iframe.style.display='block';
-      if(placeholder) placeholder.style.display='none';
-    }
-  } else {
-    // Multiple stops: static map image + Google Maps link
-    const staticUrl=buildStaticMapUrlWorking(geocoded, colorHex);
-    const mapsUrl=multiStopGoogleMapsUrl(geocoded);
-
-    if(img && staticUrl){
-      if(placeholder) placeholder.style.display='none';
-      img.style.display='block';
-
-      // Show loading state
-      img.alt='Loading map…';
-      img.style.background='var(--paper2)';
-
-      img.onload=function(){
-        img.style.background='';
-        img.alt='Map';
-        // Overlay numbered labels on the image using a canvas
-        _overlayMarkersOnImg(img, geocoded, colorHex);
-      };
-      img.onerror=function(){
-        // Static image failed — show fallback panel
-        img.style.display='none';
-        if(placeholder){
-          placeholder.style.display='flex';
-          placeholder.innerHTML=_buildFallbackHtml(geocoded, mapsUrl);
-        }
-      };
-      img.src=staticUrl;
-
-      // Add Google Maps navigation link to sidebar
-      _addGMapsSidebarLink(mapsUrl);
-    } else {
-      // No static URL — fallback to info panel
-      if(placeholder){
-        placeholder.style.display='flex';
-        placeholder.innerHTML=_buildFallbackHtml(geocoded, mapsUrl);
-      }
-    }
-  }
-}
-
-function _buildFallbackHtml(geocoded, mapsUrl){
-  return '<div style="text-align:center;padding:24px;max-width:320px">'
-    +'<div style="font-size:32px;margin-bottom:10px">🗺️</div>'
-    +'<div style="font-family:Lora,serif;font-size:16px;color:var(--ink);margin-bottom:6px">'+geocoded.length+' stops plotted</div>'
-    +'<div style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.6">View your full route with all stops in Google Maps.</div>'
-    +(mapsUrl?'<a href="'+mapsUrl+'" target="_blank" rel="noopener" style="display:inline-block;padding:9px 20px;background:var(--accent);color:#fff;border-radius:8px;font-size:13px;font-weight:600;text-decoration:none;font-family:Outfit,sans-serif;margin-bottom:14px">Open route in Google Maps ↗</a>':'')
-    +'<div style="font-size:11px;color:var(--muted);line-height:1.9;margin-top:8px">'
-    +geocoded.map(function(g,i){return '<span style="display:inline-flex;align-items:center;gap:4px"><span style="background:var(--accent);color:#fff;border-radius:50%;width:16px;height:16px;font-size:9px;font-weight:700;display:inline-flex;align-items:center;justify-content:center">'+(i+1)+'</span>'+esc(g.stop?g.stop.name:(g.place?g.place.name:'Stop '+(i+1)))+'</span>';}).join(' → ')
-    +'</div></div>';
-}
-
-function _addGMapsSidebarLink(mapsUrl){
-  if(!mapsUrl) return;
-  const sidebar=document.getElementById('map-stop-list');
-  if(!sidebar) return;
-  const old=sidebar.querySelector('.gmaps-link');
-  if(old) old.remove();
-  const link=document.createElement('a');
-  link.href=mapsUrl; link.target='_blank'; link.rel='noopener';
-  link.className='gmaps-link';
-  link.textContent='↗ Open route in Google Maps';
-  link.style.cssText='display:block;font-size:11px;color:var(--accent);margin-top:10px;padding:6px 0;border-top:1px solid var(--border);text-decoration:none;font-weight:500';
-  sidebar.appendChild(link);
-}
-
-function _overlayMarkersOnImg(img, geocoded, colorHex){
-  // Draw numbered circle markers on top of the static map image using a canvas
-  // This gives us visible numbered pins without needing a JS map library
   try{
-    const canvas=document.createElement('canvas');
-    canvas.width=img.naturalWidth||800;
-    canvas.height=img.naturalHeight||460;
-    canvas.style.cssText='position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;border-radius:var(--radius-lg)';
-
-    const parent=img.parentElement;
-    if(!parent) return;
-    // Remove any existing canvas overlay
-    const oldCanvas=parent.querySelector('.map-overlay-canvas');
-    if(oldCanvas) oldCanvas.remove();
-    canvas.className='map-overlay-canvas';
-    parent.style.position='relative';
-    parent.appendChild(canvas);
-
-    const ctx=canvas.getContext('2d');
-    if(!ctx) return;
-
-    // Calculate pixel positions from lat/lon using the same bbox as buildStaticMapUrlWorking
-    const lats=geocoded.map(function(g){return parseFloat(g.lat);});
-    const lons=geocoded.map(function(g){return parseFloat(g.lon);});
-    const minLat=Math.min.apply(null,lats);
-    const maxLat=Math.max.apply(null,lats);
-    const minLon=Math.min.apply(null,lons);
-    const maxLon=Math.max.apply(null,lons);
-    const latPad=Math.max(0.008,(maxLat-minLat)*0.35);
-    const lonPad=Math.max(0.008,(maxLon-minLon)*0.35);
-    const bboxMinLat=minLat-latPad;
-    const bboxMaxLat=maxLat+latPad;
-    const bboxMinLon=minLon-lonPad;
-    const bboxMaxLon=maxLon+lonPad;
-
-    const W=canvas.width;
-    const H=canvas.height;
-    const col=colorHex||'#2563eb';
-
-    geocoded.forEach(function(g,i){
-      const px=((parseFloat(g.lon)-bboxMinLon)/(bboxMaxLon-bboxMinLon))*W;
-      // Latitude is inverted (top = maxLat)
-      const py=((bboxMaxLat-parseFloat(g.lat))/(bboxMaxLat-bboxMinLat))*H;
-      const num=g.idx!=null?g.idx+1:i+1;
-      const r=14;
-
-      // Shadow
-      ctx.beginPath();
-      ctx.arc(px,py+2,r+1,0,Math.PI*2);
-      ctx.fillStyle='rgba(0,0,0,0.25)';
-      ctx.fill();
-
-      // Circle
-      ctx.beginPath();
-      ctx.arc(px,py,r,0,Math.PI*2);
-      ctx.fillStyle=col;
-      ctx.fill();
-      ctx.strokeStyle='#fff';
-      ctx.lineWidth=2.5;
-      ctx.stroke();
-
-      // Number
-      ctx.fillStyle='#fff';
-      ctx.font='bold 11px Outfit,sans-serif';
-      ctx.textAlign='center';
-      ctx.textBaseline='middle';
-      ctx.fillText(String(num),px,py);
-    });
-
-    // Draw connecting polyline
-    if(geocoded.length>1){
-      ctx.beginPath();
-      geocoded.forEach(function(g,i){
-        const px=((parseFloat(g.lon)-bboxMinLon)/(bboxMaxLon-bboxMinLon))*W;
-        const py=((bboxMaxLat-parseFloat(g.lat))/(bboxMaxLat-bboxMinLat))*H;
-        if(i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
-      });
-      ctx.strokeStyle=col;
-      ctx.lineWidth=2;
-      ctx.setLineDash([6,4]);
-      ctx.globalAlpha=0.7;
-      ctx.stroke();
-      ctx.globalAlpha=1;
-      ctx.setLineDash([]);
-    }
-
-  }catch(e){ console.warn('Canvas overlay failed:', e); }
-}
-
-function hideMapIframe(){
-  const iframe=document.getElementById('map-iframe');
-  if(iframe){iframe.src='about:blank';iframe.style.display='none';}
-  const img=document.getElementById('map-static-img');
-  if(img){img.src='';img.style.display='none';}
-  const parent=img&&img.parentElement;
-  if(parent){const c=parent.querySelector('.map-overlay-canvas');if(c)c.remove();}
-  const placeholder=document.getElementById('map-placeholder');
-  if(placeholder){
-    placeholder.style.display='flex';
-    if(!placeholder.querySelector('.map-placeholder-icon')){
-      placeholder.innerHTML=
-        '<div class="map-placeholder-icon">🗺️</div>'+
-        '<div class="map-placeholder-title">Map view</div>'+
-        '<div class="map-placeholder-sub" id="map-placeholder-sub">Select a day to see stops on the map.</div>';
-    }
+    const raw=await callClaude(prompt,1800);
+    const items=JSON.parse(raw.replace(/```json|```/g,'').trim());
+    renderDaySuggestions(el,items,di,selectedType);
+  }catch(e){
+    const isFile=window.location.protocol==='file:';
+    el.innerHTML='<div style="padding:12px;font-size:13px;color:var(--muted);line-height:1.6">'
+      +(isFile
+        ? '<strong>AI suggestions need a web server.</strong> Host this file on GitHub Pages or a local server to enable this feature.'
+        : 'Could not load suggestions — try again.')
+      +'</div>';
+    el.dataset.mode='';
+    console.error(e);
   }
 }
 
-// Aliases
-function showLeafletMap(geocoded,colorHex,labelFn){showMapIframe(geocoded,colorHex);}
-function hideLeafletMap(){hideMapIframe();}
-function destroyLeafletMap(){hideMapIframe();}
+function renderDaySuggestions(container,items,di,selectedType){
+  if(!items||!items.length){ container.innerHTML=''; container.dataset.mode=''; return; }
 
+  const wrap=document.createElement('div');
+  wrap.className='fade-in';
+  wrap.style.cssText='padding:4px 0 8px';
 
-async function showMapForDay(di,day){
-  const listEl=document.getElementById('map-stop-list');
+  // Header row
+  const header=document.createElement('div');
+  header.style.cssText='display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;padding:0 2px';
+  const htitle=document.createElement('div');
+  htitle.className='suggest-title';
+  htitle.textContent=selectedType+' suggestions for Day '+(di+1);
+  const hclose=document.createElement('button');
+  hclose.className='btn-dismiss-suggest';
+  hclose.textContent='✕ Close';
+  hclose.onclick=function(){ container.innerHTML=''; container.dataset.mode=''; };
+  const hmore=document.createElement('button');
+  hmore.className='btn-more-suggest';
+  hmore.textContent='↻ Refresh';
+  hmore.onclick=function(){ runDaySuggestions(di); };
+  header.appendChild(htitle);
+  const headerRight=document.createElement('div');
+  headerRight.style.cssText='display:flex;gap:7px';
+  headerRight.appendChild(hmore);
+  headerRight.appendChild(hclose);
+  header.appendChild(headerRight);
+  wrap.appendChild(header);
 
-  // Geocode each stop, wrapping individually so one failure doesn't block others
-  const geocoded=[];
-  for(var i=0;i<day.stops.length;i++){
-    try{
-      const result=await geocodeStop(day.stops[i]);
-      if(result&&result.lat&&result.lon){
-        geocoded.push({stop:day.stops[i], idx:i, lat:result.lat, lon:result.lon});
-      }
-    }catch(e){ console.warn('Geocode failed for stop:', day.stops[i].name, e); }
-  }
+  const grid=document.createElement('div');
+  grid.className='suggest-grid';
 
-  // Update sidebar — dim stops that couldn't be located
-  listEl.querySelectorAll('.map-stop-row').forEach(function(row,i){
-    const found=geocoded.find(function(g){return g.idx===i;});
-    const nameEl=row.querySelector('.map-stop-name');
-    if(nameEl&&!found){
-      nameEl.style.opacity='0.45';
-      nameEl.title='Location not found — add city, province, and country for better accuracy';
+  items.forEach(function(item){
+    const card=document.createElement('div');
+    card.className='suggest-card';
+
+    const typeRow=document.createElement('div');
+    typeRow.className='suggest-card-type';
+    typeRow.textContent=(item.type||selectedType)+(item.destination?' · '+item.destination:'');
+
+    const nameEl=document.createElement('div');
+    nameEl.className='suggest-card-name';
+    nameEl.textContent=item.name||'';
+
+    const metaRow=document.createElement('div');
+    metaRow.className='suggest-card-meta';
+    if(item.priority==='nearby'){
+      const b=document.createElement('span');
+      b.className='suggest-meta-badge badge-nearby';
+      b.textContent='📍 Nearby';
+      metaRow.appendChild(b);
+    } else {
+      const b=document.createElement('span');
+      b.className='suggest-meta-badge badge-rated';
+      b.textContent='⭐ Highly rated';
+      metaRow.appendChild(b);
     }
+
+    const descEl=document.createElement('div');
+    descEl.className='suggest-card-desc';
+    descEl.textContent=item.description||'';
+
+    const distEl=document.createElement('div');
+    if(item.distance){
+      distEl.style.cssText='font-size:11px;color:var(--accent2);margin-top:4px;font-weight:500';
+      distEl.textContent='🚶 '+item.distance;
+    }
+
+    if(item.address){
+      const addrEl=document.createElement('div');
+      addrEl.style.cssText='color:var(--muted);font-size:11px;margin-top:3px';
+      addrEl.textContent='📍 '+item.address;
+      distEl.appendChild(addrEl);
+    }
+
+    const addBtn=document.createElement('button');
+    addBtn.className='suggest-add-btn';
+    addBtn.title='Add to Day '+(di+1);
+    addBtn.textContent='+';
+    addBtn.addEventListener('click',function(){ addSuggestion(item,di); });
+
+    card.appendChild(typeRow);
+    card.appendChild(nameEl);
+    card.appendChild(metaRow);
+    card.appendChild(descEl);
+    card.appendChild(distEl);
+    card.appendChild(addBtn);
+    grid.appendChild(card);
   });
 
-  if(!geocoded.length){
-    // Nothing geocoded — fall back to centring on the trip destination
-    const fallback=[trip.destinations&&trip.destinations[0],trip.name].filter(Boolean)[0]||'';
-    try{
-      const r=await fetch('https://nominatim.openstreetmap.org/search?q='+encodeURIComponent(fallback)+'&format=json&limit=1',
-        {headers:{'User-Agent':'WaypointTravelApp/2.0'}});
-      const data=await r.json();
-      if(data.length){
-        const fallbackQ = encodeURIComponent(data[0].display_name||fallback);
-        const iframe = document.getElementById('map-iframe');
-        const ph = document.getElementById('map-placeholder');
-        if(ph) ph.style.display='none';
-        if(iframe){
-          iframe.src='https://maps.google.com/maps?q='+fallbackQ+'&output=embed&z=12';
-          iframe.style.display='block';
-        }
-        return;
-      }
-    }catch(e){}
-    hideLeafletMap();
-    (document.getElementById('map-placeholder-sub')||{}).textContent='Could not locate stops — add city, province, and country to each stop.';
-    return;
-  }
-
-  showLeafletMap(geocoded, dc(di), function(g,i){ return g.idx+1; });
+  wrap.appendChild(grid);
+  container.innerHTML='';
+  container.appendChild(wrap);
 }
 
+// Legacy: called after adding a stop (auto-suggest off by default now — user initiates)
+function loadDaySuggestions(di,auto){
+  if(auto) return; // suppress auto-trigger; user clicks Suggest button explicitly
+}
+
+function renderSuggestions(container,items,mode,di){
+  if(!items||!items.length){container.innerHTML='';return;}
+  const grid=document.createElement('div');
+  grid.className='suggest-grid fade-in';
+  items.forEach(function(item){
+    const card=document.createElement('div');
+    card.className='suggest-card';
+    const dayIdx=mode==='day'?di:Math.max(0,(item.day||1)-1);
+
+    const typeEl=document.createElement('div');
+    typeEl.className='suggest-card-type';
+    typeEl.textContent=(item.type||'Other')+(item.destination?' · '+item.destination:'');
+
+    const nameEl=document.createElement('div');
+    nameEl.className='suggest-card-name';
+    nameEl.textContent=item.name||'';
+
+    const descEl=document.createElement('div');
+    descEl.className='suggest-card-desc';
+    descEl.textContent=item.description||'';
+    if(item.address){
+      const addrEl=document.createElement('div');
+      addrEl.style.cssText='color:var(--accent2);font-size:11px;margin-top:3px';
+      addrEl.textContent='📍 '+item.address;
+      descEl.appendChild(addrEl);
+    }
+
+    const addBtn=document.createElement('button');
+    addBtn.className='suggest-add-btn';
+    addBtn.title='Add to itinerary';
+    addBtn.textContent='+';
+    addBtn.addEventListener('click',function(){ addSuggestion(item,dayIdx); });
+
+    card.appendChild(typeEl);
+    card.appendChild(nameEl);
+    card.appendChild(descEl);
+    card.appendChild(addBtn);
+    grid.appendChild(card);
+  });
+  container.innerHTML='';
+  container.appendChild(grid);
+}
+
+function addSuggestion(item,di){
+  const idx=Math.max(0,Math.min(di,trip.days.length-1));
+  trip.days[idx].stops.push({
+    name:item.name,type:item.type||'📍 Other',
+    time:item.time||'',address:item.address||'',
+    destination:item.destination||'',
+    notes:item.description||'',duration:'',ai:true
+  });
+  renderStopsInDay(idx);
+  scheduleSave();
+  toast(`Added "${item.name}" to Day ${trip.days[idx].day} ✓`);
+}
+
+// ═══════════════════════════════════════════
+// MAP
+// ═══════════════════════════════════════════
 // ═══════════════════════════════════════════
 // CSV IMPORT
 // ═══════════════════════════════════════════
@@ -2465,6 +2057,233 @@ Types: 🏛️ Attraction, 🍽️ Food, 🍸 Bar, ☕ Café, 🌿 Nature, 🛍�
 }
 
 // ═══════════════════════════════════════════
+// ROUTE BUTTON (day header)
+// ═══════════════════════════════════════════
+function openDayRoute(di){
+  const day=trip.days[di];
+  if(!day.stops.length){ toast('Add stops to this day first'); return; }
+  const addresses=day.stops.map(function(s){
+    return [s.name,s.address,s.destination,s.province,s.country].filter(Boolean).join(', ');
+  }).filter(Boolean);
+  if(!addresses.length){ toast('Add location details to stops first'); return; }
+  if(addresses.length===1){
+    window.open('https://maps.google.com/maps?q='+encodeURIComponent(addresses[0]),'_blank');
+  } else {
+    const parts=addresses.map(encodeURIComponent).join('/');
+    window.open('https://www.google.com/maps/dir/'+parts+'/','_blank');
+  }
+}
+
+// ═══════════════════════════════════════════
+// PLACES MAP
+// ═══════════════════════════════════════════
+let placesMapFilter='All';
+
+// Build an OSM iframe URL that shows a bounding box of all geocoded places.
+// The iframe shows the map area reliably — numbered pins are shown in the legend sidebar.
+function buildPlacesMapUrl(geocoded){
+  if(!geocoded.length) return null;
+  const lats=geocoded.map(function(g){return g.lat;});
+  const lons=geocoded.map(function(g){return g.lon;});
+  const minLat=Math.min.apply(null,lats);
+  const maxLat=Math.max.apply(null,lats);
+  const minLon=Math.min.apply(null,lons);
+  const maxLon=Math.max.apply(null,lons);
+  const pad=Math.max(0.015,(Math.max(maxLat-minLat,maxLon-minLon))*0.25);
+  const bbox=[minLon-pad,minLat-pad,maxLon+pad,maxLat+pad];
+  // Use OpenStreetMap export embed — reliable, no API key, shows area correctly
+  return 'https://www.openstreetmap.org/export/embed.html'
+    +'?bbox='+bbox.join('%2C')
+    +'&layer=mapnik'
+    +'&marker='+((minLat+maxLat)/2).toFixed(5)+'%2C'+((minLon+maxLon)/2).toFixed(5);
+}
+
+// ═══════════════════════════════════════════
+// GEOCODING
+// ═══════════════════════════════════════════
+function expandProvince(raw){
+  if(!raw) return raw;
+  const map={
+    'BC':'British Columbia','AB':'Alberta','SK':'Saskatchewan','MB':'Manitoba',
+    'ON':'Ontario','QC':'Quebec','NB':'New Brunswick','NS':'Nova Scotia',
+    'PE':'Prince Edward Island','NL':'Newfoundland and Labrador',
+    'YT':'Yukon','NT':'Northwest Territories','NU':'Nunavut',
+    'AL':'Alabama','AK':'Alaska','AZ':'Arizona','AR':'Arkansas','CA':'California',
+    'CO':'Colorado','CT':'Connecticut','DE':'Delaware','FL':'Florida','GA':'Georgia',
+    'HI':'Hawaii','ID':'Idaho','IL':'Illinois','IN':'Indiana','IA':'Iowa',
+    'KS':'Kansas','KY':'Kentucky','LA':'Louisiana','ME':'Maine','MD':'Maryland',
+    'MA':'Massachusetts','MI':'Michigan','MN':'Minnesota','MS':'Mississippi',
+    'MO':'Missouri','MT':'Montana','NE':'Nebraska','NV':'Nevada','NH':'New Hampshire',
+    'NJ':'New Jersey','NM':'New Mexico','NY':'New York','NC':'North Carolina',
+    'ND':'North Dakota','OH':'Ohio','OK':'Oklahoma','OR':'Oregon','PA':'Pennsylvania',
+    'RI':'Rhode Island','SC':'South Carolina','SD':'South Dakota','TN':'Tennessee',
+    'TX':'Texas','UT':'Utah','VT':'Vermont','VA':'Virginia','WA':'Washington',
+    'WV':'West Virginia','WI':'Wisconsin','WY':'Wyoming','DC':'District of Columbia'
+  };
+  return map[raw.trim().toUpperCase()]||raw;
+}
+
+const COUNTRY_ALIASES={
+  'canada':['canada'],'united states':['united states','usa'],'us':['united states','usa'],
+  'usa':['united states','usa'],'australia':['australia'],'au':['australia'],
+  'united kingdom':['united kingdom'],'uk':['united kingdom'],
+  'japan':['japan'],'thailand':['thailand'],'taiwan':['taiwan'],
+  'france':['france'],'germany':['germany'],'italy':['italy'],
+  'spain':['spain'],'singapore':['singapore'],'indonesia':['indonesia'],
+  'vietnam':['viet nam','vietnam'],'south korea':['south korea','korea'],
+  'china':['china'],'india':['india'],'new zealand':['new zealand','nz'],
+};
+
+function matchesCountry(displayName, country){
+  if(!country) return true;
+  const lower=country.toLowerCase().trim();
+  const aliases=COUNTRY_ALIASES[lower]||[lower];
+  const dispLower=displayName.toLowerCase();
+  return aliases.some(function(a){return dispLower.includes(a);});
+}
+
+async function nominatimSearch(query, country){
+  const url='https://nominatim.openstreetmap.org/search?q='+encodeURIComponent(query)+'&format=json&limit=5&addressdetails=1';
+  const r=await fetch(url,{headers:{'User-Agent':'WaypointTravelApp/2.0'}});
+  const data=await r.json();
+  if(!data.length) return null;
+  if(country){
+    const match=data.find(function(d){return matchesCountry(d.display_name,country);});
+    return match||null;
+  }
+  return data[0];
+}
+
+async function geocodeStop(stop){
+  const province=expandProvince(stop.province);
+  const city=stop.destination||'';
+  const address=stop.address||'';
+  const country=stop.country||'';
+
+  const queries=[];
+  if(address&&city&&province&&country) queries.push(address+', '+city+', '+province+', '+country);
+  if(address&&city&&country)           queries.push(address+', '+city+', '+country);
+  if(address&&city&&province)          queries.push(address+', '+city+', '+province);
+  if(address&&city)                    queries.push(address+', '+city);
+  if(city&&province&&country)          queries.push(city+', '+province+', '+country);
+  if(city&&country)                    queries.push(city+', '+country);
+  if(city&&province)                   queries.push(city+', '+province);
+  if(city)                             queries.push(city);
+  if(!queries.length){
+    const fallback=(trip&&trip.destinations&&trip.destinations[0])||'';
+    if(fallback) queries.push(fallback);
+  }
+
+  const seen=new Set();
+  const deduped=queries.filter(function(q){
+    const k=q.trim().toLowerCase();
+    if(seen.has(k)||!q.trim()) return false;
+    seen.add(k); return true;
+  });
+
+  for(var i=0;i<deduped.length;i++){
+    try{
+      const result=await nominatimSearch(deduped[i], country);
+      if(result){
+        return {lat:parseFloat(result.lat),lon:parseFloat(result.lon),display:result.display_name};
+      }
+    }catch(e){ console.warn('Geocode failed:', deduped[i], e); }
+  }
+  return null;
+}
+
+
+async function renderPlacesMap(){
+  const iframe=document.getElementById('places-map-iframe');
+  const placeholder=document.getElementById('places-map-placeholder');
+  const legend=document.getElementById('places-map-legend');
+  const statusEl=document.getElementById('places-map-status');
+  if(!iframe||!trip) return;
+
+  if(!trip.places||!trip.places.length){
+    if(placeholder) placeholder.style.display='flex';
+    iframe.style.display='none';
+    if(legend) legend.innerHTML='<div style="font-size:11px;color:var(--muted);padding:8px">No places added yet.</div>';
+    if(statusEl) statusEl.textContent='';
+    return;
+  }
+
+  const filtered=placesMapFilter==='All'
+    ? trip.places
+    : trip.places.filter(function(p){return (p.type||'📍 Other')===placesMapFilter;});
+
+  if(!filtered.length){
+    if(placeholder){ placeholder.style.display='flex'; placeholder.querySelector&&(placeholder.innerHTML='<div style="font-size:13px;color:var(--muted)">No places match this filter.</div>'); }
+    iframe.style.display='none';
+    if(legend) legend.innerHTML='<div style="font-size:11px;color:var(--muted);padding:8px">No places match this filter.</div>';
+    if(statusEl) statusEl.textContent='';
+    return;
+  }
+
+  if(statusEl) statusEl.textContent='Locating '+filtered.length+' place'+(filtered.length!==1?'s':'')+'…';
+  if(legend) legend.innerHTML='<div style="font-size:11px;color:var(--muted);padding:8px;font-style:italic">Loading…</div>';
+
+  // Geocode all filtered places
+  const geocoded=[];
+  for(var i=0;i<filtered.length;i++){
+    try{
+      const result=await geocodeStop(filtered[i]);
+      if(result&&result.lat&&result.lon){
+        geocoded.push({place:filtered[i],idx:i,lat:result.lat,lon:result.lon});
+      }
+    }catch(e){ console.warn('Geocode failed:',filtered[i].name,e); }
+  }
+
+  // Build legend regardless of geocode results
+  if(legend){
+    legend.innerHTML='';
+    filtered.forEach(function(p,i){
+      const found=geocoded.find(function(g){return g.idx===i;});
+      const item=document.createElement('div');
+      item.className='places-map-legend-item';
+      const num=document.createElement('div');
+      num.className='places-map-legend-num';
+      num.style.background=found?'var(--suggest)':'var(--muted)';
+      num.textContent=i+1;
+      const info=document.createElement('div');
+      info.className='places-map-legend-info';
+      const name=document.createElement('div');
+      name.className='places-map-legend-name';
+      name.textContent=p.name;
+      name.style.opacity=found?'1':'0.45';
+      name.title=found?'':'No location data — add city and country';
+      const sub=document.createElement('div');
+      sub.className='places-map-legend-sub';
+      sub.textContent=[p.type,p.destination].filter(Boolean).join(' · ')||'';
+      info.appendChild(name);
+      info.appendChild(sub);
+      item.appendChild(num);
+      item.appendChild(info);
+      legend.appendChild(item);
+    });
+  }
+
+  const failCount=filtered.length-geocoded.length;
+  if(statusEl){
+    statusEl.textContent=geocoded.length+' of '+filtered.length+' located'+(failCount?' ('+failCount+' need location data)':'');
+  }
+
+  if(!geocoded.length){
+    if(placeholder){ placeholder.style.display='flex'; placeholder.innerHTML='<div style="font-size:13px;color:var(--muted);text-align:center;padding:20px">No places could be located.<br><span style=\"font-size:11px\">Add city, province, and country to each place.</span></div>'; }
+    iframe.style.display='none';
+    return;
+  }
+
+  const url=buildPlacesMapUrl(geocoded);
+  if(url){
+    iframe.src=url;
+    iframe.style.display='block';
+    if(placeholder) placeholder.style.display='none';
+  }
+}
+
+
+// ═══════════════════════════════════════════
 // PLACES
 // ═══════════════════════════════════════════
 let placeFilterType = 'All';
@@ -2475,39 +2294,50 @@ function renderPlaces(){
   if(!trip) return;
   if(!trip.places) trip.places=[];
 
-  const grid = document.getElementById('places-grid');
+  const carousel = document.getElementById('places-carousel');
   const countEl = document.getElementById('places-count');
-  if(!grid) return;
+  if(!carousel) return;
 
   const places = trip.places;
-  countEl.textContent = places.length + ' place' + (places.length!==1?'s':'') + ' saved';
+  if(countEl) countEl.textContent = places.length + ' place' + (places.length!==1?'s':'') + ' saved';
+
+  // Sync filter state between cards and map
+  // placeFilterType drives the cards; placesMapFilter drives the map
+  // Keep them in sync
+  placesMapFilter = placeFilterType;
 
   // Build type filter pills
   const filterEl = document.getElementById('places-filter');
   if(filterEl){
-    const types = ['All', ...new Set(places.map(p=>p.type||'📍 Other'))];
+    const types = ['All', ...new Set(places.map(function(p){ return p.type||'📍 Other'; }))];
     filterEl.innerHTML = '';
     types.forEach(function(t){
       const btn = document.createElement('button');
       btn.className = 'filter-pill' + (placeFilterType===t?' active':'');
       btn.textContent = t;
-      btn.onclick = function(){ placeFilterType=t; renderPlaces(); };
+      btn.onclick = function(){
+        placeFilterType=t;
+        placesMapFilter=t;
+        renderPlaces();
+      };
       filterEl.appendChild(btn);
     });
   }
 
-  const filtered = placeFilterType==='All' ? places : places.filter(function(p){ return (p.type||'📍 Other')===placeFilterType; });
+  const filtered = placeFilterType==='All'
+    ? places
+    : places.filter(function(p){ return (p.type||'📍 Other')===placeFilterType; });
 
   if(!filtered.length){
-    grid.innerHTML = places.length
-      ? '<div class="places-empty"><div class="places-empty-icon">🔍</div><div class="places-empty-text">No places match this filter.</div></div>'
-      : '<div class="places-empty"><div class="places-empty-icon">📌</div><div class="places-empty-text">No places saved yet.<br>Add places here as a staging area,<br>then move them into days when ready.</div></div>';
+    carousel.innerHTML = places.length
+      ? '<div class="places-empty" style="grid-column:1/-1"><div class="places-empty-icon">🔍</div><div class="places-empty-text">No places match this filter.</div></div>'
+      : '<div class="places-empty" style="grid-column:1/-1"><div class="places-empty-icon">📌</div><div class="places-empty-text">No places saved yet.<br>Add places to see them on the map below.</div></div>';
+    renderPlacesMap();
     return;
   }
 
-  grid.innerHTML = '';
-  filtered.forEach(function(place, fi){
-    // Map filtered index back to real index in trip.places
+  carousel.innerHTML = '';
+  filtered.forEach(function(place){
     const realIdx = trip.places.indexOf(place);
     const card = document.createElement('div');
     card.className = 'place-card';
@@ -2526,7 +2356,11 @@ function renderPlaces(){
       document.querySelectorAll('.day-block').forEach(function(b){ b.classList.remove('drag-over'); });
     });
 
-    const addrParts = [place.address, place.destination, place.province, place.country].filter(Boolean);
+    const addrParts = [place.address,place.destination,place.province,place.country].filter(Boolean);
+
+    const dragHint = document.createElement('div');
+    dragHint.className = 'place-drag-hint';
+    dragHint.textContent = '⠿';
 
     const typeEl = document.createElement('div');
     typeEl.className = 'place-card-type';
@@ -2535,10 +2369,6 @@ function renderPlaces(){
     const nameEl = document.createElement('div');
     nameEl.className = 'place-card-name';
     nameEl.textContent = place.name || '';
-
-    const dragHint = document.createElement('div');
-    dragHint.className = 'place-drag-hint';
-    dragHint.textContent = '⠿';
 
     const actionsEl = document.createElement('div');
     actionsEl.className = 'place-card-actions';
@@ -2578,9 +2408,13 @@ function renderPlaces(){
       card.appendChild(notesEl);
     }
     card.appendChild(actionsEl);
-    grid.appendChild(card);
+    carousel.appendChild(card);
   });
+
+  // Render the map below — async, doesn't block card rendering
+  renderPlacesMap();
 }
+
 
 function toggleAddPlaceForm(){
   const form = document.getElementById('add-place-form');
