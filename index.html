@@ -2146,10 +2146,11 @@ async function renderPlacesMap(){
     return;
   }
 
-  if(statusEl) statusEl.textContent = 'Locating '+filtered.length+' place'+(filtered.length!==1?'s':'')+'…';
-  if(legend) legend.innerHTML='<div style="font-size:11px;color:var(--muted);padding:8px;font-style:italic">Locating…</div>';
+  var totalToGeocode = filtered.length;
+  if(statusEl) statusEl.textContent = 'Locating '+totalToGeocode+' place'+(totalToGeocode!==1?'s':'')+'… (may take a moment)';
+  if(legend) legend.innerHTML='<div style="font-size:11px;color:var(--muted);padding:8px;font-style:italic">Locating places…</div>';
 
-  // Geocode all filtered places
+  // Geocode all filtered places — small delay between calls to respect Nominatim rate limit
   var geocoded = [];
   for(var i=0; i<filtered.length; i++){
     try{
@@ -2158,6 +2159,10 @@ async function renderPlacesMap(){
         geocoded.push({place:filtered[i], idx:i, lat:result.lat, lon:result.lon});
       }
     }catch(e){ console.warn('Geocode failed:', filtered[i].name, e); }
+    // Nominatim usage policy: max 1 request/second
+    if(i < filtered.length - 1){
+      await new Promise(function(r){ setTimeout(r, 1100); });
+    }
   }
 
   // Build legend
@@ -2383,10 +2388,14 @@ function matchesCountry(displayName, country){
 }
 
 async function nominatimSearch(query, country){
-  const url='https://nominatim.openstreetmap.org/search?q='+encodeURIComponent(query)+'&format=json&limit=5&addressdetails=1';
-  const r=await fetch(url,{headers:{'User-Agent':'WaypointTravelApp/2.0'}});
+  // Note: browsers ignore custom User-Agent headers for security reasons.
+  // Nominatim is called without custom headers to avoid CORS preflight failures.
+  const url='https://nominatim.openstreetmap.org/search?q='+encodeURIComponent(query)
+    +'&format=json&limit=5&addressdetails=1&accept-language=en';
+  const r=await fetch(url);
+  if(!r.ok) throw new Error('Nominatim HTTP '+r.status);
   const data=await r.json();
-  if(!data.length) return null;
+  if(!data||!data.length) return null;
   if(country){
     const match=data.find(function(d){return matchesCountry(d.display_name,country);});
     return match||null;
