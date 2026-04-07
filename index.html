@@ -2081,22 +2081,69 @@ let placesMapFilter='All';
 
 // Build an OSM iframe URL that shows a bounding box of all geocoded places.
 // The iframe shows the map area reliably — numbered pins are shown in the legend sidebar.
-function buildPlacesMapUrl(geocoded){
+function buildPlacesMapHtml(geocoded){
   if(!geocoded.length) return null;
-  const lats=geocoded.map(function(g){return g.lat;});
-  const lons=geocoded.map(function(g){return g.lon;});
-  const minLat=Math.min.apply(null,lats);
-  const maxLat=Math.max.apply(null,lats);
-  const minLon=Math.min.apply(null,lons);
-  const maxLon=Math.max.apply(null,lons);
-  const pad=Math.max(0.015,(Math.max(maxLat-minLat,maxLon-minLon))*0.25);
-  const bbox=[minLon-pad,minLat-pad,maxLon+pad,maxLat+pad];
-  // Use OpenStreetMap export embed — reliable, no API key, shows area correctly
-  return 'https://www.openstreetmap.org/export/embed.html'
-    +'?bbox='+bbox.join('%2C')
-    +'&layer=mapnik'
-    +'&marker='+((minLat+maxLat)/2).toFixed(5)+'%2C'+((minLon+maxLon)/2).toFixed(5);
+
+  var lats=geocoded.map(function(g){return g.lat;});
+  var lons=geocoded.map(function(g){return g.lon;});
+  var minLat=Math.min.apply(null,lats);
+  var maxLat=Math.max.apply(null,lats);
+  var minLon=Math.min.apply(null,lons);
+  var maxLon=Math.max.apply(null,lons);
+
+  // Serialize marker data as JSON for injection into blob HTML
+  var markerData=geocoded.map(function(g,i){
+    var p=g.place||g.stop||{};
+    return {
+      lat:g.lat, lon:g.lon, num:i+1,
+      name:(p.name||('Place '+(i+1))).replace(/"/g,'&quot;'),
+      type:(p.type||'').replace(/"/g,'&quot;'),
+      addr:([p.address,p.destination].filter(Boolean).join(', ')).replace(/"/g,'&quot;')
+    };
+  });
+
+  // Build the iframe HTML as a plain string — use double quotes only inside JS,
+  // keep the HTML attribute values in single quotes to avoid any nesting issues
+  var markerStyle='background:#7c3aed;color:#fff;width:26px;height:26px;'
+    +'border-radius:50%;display:flex;align-items:center;justify-content:center;'
+    +'font-size:11px;font-weight:700;border:2px solid #fff;'
+    +'box-shadow:0 2px 5px rgba(0,0,0,.35);font-family:sans-serif';
+
+  var html='<!DOCTYPE html><html><head>'
+    +'<meta charset="UTF-8">'
+    +'<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">'
+    +'<style>*{margin:0;padding:0;box-sizing:border-box}html,body,#map{width:100%;height:100%;overflow:hidden}</style>'
+    +'</head><body><div id="map"></div>'
+    +'<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"><'
+    +'/script><script>'
+    +'(function(){'
+    +'var data='+JSON.stringify(markerData)+';'
+    +'var map=L.map("map");'
+    +'L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(map);'
+    +'var ll=[];'
+    +'data.forEach(function(m){'
+    +'var d=document.createElement("div");'
+    +'d.style.cssText="'+markerStyle+'";'
+    +'d.textContent=m.num;'
+    +'var ic=L.divIcon({html:d.outerHTML,className:"",iconSize:[26,26],iconAnchor:[13,13]});'
+    +'var mk=L.marker([m.lat,m.lon],{icon:ic}).addTo(map);'
+    +'var pop="<b>"+m.name+"</b>";'
+    +'if(m.type)pop+="<br><small>"+m.type+"</small>";'
+    +'if(m.addr)pop+="<br><small style=\"color:#059669\">"+m.addr+"</small>";'
+    +'mk.bindPopup(pop);'
+    +'ll.push([m.lat,m.lon]);'
+    +'});'
+    +'if(ll.length===1){map.setView(ll[0],15);}'
+    +'else{'
+    +'map.fitBounds(L.latLngBounds(ll),{padding:[40,40]});'
+    +'L.polyline(ll,{color:"#7c3aed",weight:2,dashArray:"5 4",opacity:0.6}).addTo(map);'
+    +'}'
+    +'})();'
+    +'<'+'/script></body></html>';
+
+  return html;
 }
+
 
 // ═══════════════════════════════════════════
 // GEOCODING
@@ -2274,11 +2321,27 @@ async function renderPlacesMap(){
     return;
   }
 
-  const url=buildPlacesMapUrl(geocoded);
-  if(url){
-    iframe.src=url;
-    iframe.style.display='block';
-    if(placeholder) placeholder.style.display='none';
+  const mapHtml=buildPlacesMapHtml(geocoded);
+  if(mapHtml){
+    // srcdoc is the most reliable approach — works on GitHub Pages regardless of CSP,
+    // no blob URL needed, Leaflet still runs in its own isolated document context
+    try{
+      iframe.srcdoc=mapHtml;
+      iframe.style.display='block';
+      if(placeholder) placeholder.style.display='none';
+    }catch(e){
+      // srcdoc failed — try blob URL as fallback
+      try{
+        const blob=new Blob([mapHtml],{type:'text/html'});
+        const url=URL.createObjectURL(blob);
+        iframe.src=url;
+        iframe.style.display='block';
+        if(placeholder) placeholder.style.display='none';
+        setTimeout(function(){try{URL.revokeObjectURL(url);}catch(_){}},30000);
+      }catch(e2){
+        console.warn('Both srcdoc and blob URL failed:',e2);
+      }
+    }
   }
 }
 
