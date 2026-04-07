@@ -320,6 +320,20 @@ input,select,textarea{font-family:'Outfit',sans-serif}
 .badge-rated{background:#fffbeb;color:#92400e;border:1px solid #fcd34d}
 .badge-type{background:var(--suggest-light);color:var(--suggest);border:1px solid #ddd6fe}
 
+
+/* ── COMMUTE ROWS ── */
+.commute-row{display:flex;align-items:center;gap:8px;padding:4px 16px 4px 52px;color:var(--muted);font-size:11px;background:linear-gradient(to right,#f8f8f8,transparent)}
+.commute-line{width:1px;height:20px;background:var(--border2);margin-left:10px;flex-shrink:0}
+.commute-badge{background:var(--paper2);border:1px solid var(--border);border-radius:10px;padding:2px 8px;font-size:11px;color:var(--muted);white-space:nowrap}
+.commute-badge.drive{color:#b45309;border-color:#fcd34d;background:#fffbeb}
+.commute-badge.walk{color:#065f46;border-color:#a7f3d0;background:#ecfdf5}
+.commute-loading{color:var(--muted);font-style:italic}
+.btn-commute{padding:4px 10px;border:1px solid var(--border2);border-radius:6px;background:var(--paper3);font-size:11px;color:var(--muted);cursor:pointer;transition:all .12s;font-family:'Outfit',sans-serif}
+.btn-commute:hover{border-color:var(--accent);color:var(--accent)}
+/* ── LEAFLET INSIDE CONTAINER ── */
+#leaflet-map-container{width:100%;height:100%;position:relative}
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
 </style>
 </head>
 <body>
@@ -499,12 +513,15 @@ input,select,textarea{font-family:'Outfit',sans-serif}
           <div class="map-sb-label" id="map-sb-label">Stops</div>
           <div id="map-stop-list"><p style="font-size:12px;color:var(--muted)">Select a day above.</p></div>
         </div>
-        <div class="map-frame-wrap" style="position:relative">
+        <div class="map-frame-wrap" style="position:relative" id="map-frame-wrap">
           <div class="map-placeholder" id="map-placeholder">
             <div class="map-placeholder-icon">🗺️</div>
             <div class="map-placeholder-title">Map view</div>
             <div class="map-placeholder-sub" id="map-placeholder-sub">Select a day to see stops on the map.</div>
           </div>
+          <!-- Leaflet map — only initialised after user selects a day -->
+          <div id="leaflet-map-container" style="display:none;width:100%;height:100%;min-height:460px"></div>
+          <!-- Single-location Google Maps embed (no API key) -->
           <iframe id="map-iframe" style="width:100%;height:460px;display:none;border:none;border-radius:var(--radius-lg)" allowfullscreen loading="lazy"></iframe>
         </div>
       </div>
@@ -645,6 +662,7 @@ const TYPE_ICONS={'🏛️ Attraction':'🏛️','🍽️ Food':'🍽️','🍸 
 let trip=null;
 let editTarget=null;
 let activeMapDay=null;
+let leafletMap=null;
 let mapMode='days';
 let mapPlacesFilter='All';
 let csvRaw=null;
@@ -1029,6 +1047,7 @@ function buildDayBlock(di){
         <span class="stop-count" id="sc-${di}">${sc} stop${sc!==1?'s':''}</span>
         <button class="action-btn" onclick="openAddForm(${di})">+ Add stop</button>
         <button class="action-btn" style="border-color:#ddd6fe;color:var(--suggest)" onclick="openSuggestPicker(${di})">✦ Suggest</button>
+        <button class="action-btn" id="commute-btn-${di}" style="border-color:#a7f3d0;color:#065f46" onclick="getCommuteTimes(${di})">🚗 Commute</button>
       </div>
     </div>
     <div class="stops-list" id="stops-${di}"></div>
@@ -1083,6 +1102,8 @@ function renderStopsInDay(di,wrap){
     return;
   }
   list.innerHTML='';
+  const commutesKey='commutes-day-'+di;
+  const savedCommutes=trip._commutes&&trip._commutes[commutesKey]||[];
   day.stops.forEach((s,si)=>{
     const row=document.createElement('div');
     row.className='stop-row';
@@ -1105,6 +1126,29 @@ function renderStopsInDay(di,wrap){
         <button class="action-btn del" onclick="deleteStop(${di},${si})">✕</button>
       </div>`;
     list.appendChild(row);
+
+    // Commute row between this stop and the next
+    if(si < day.stops.length - 1){
+      const commuteRow=document.createElement('div');
+      commuteRow.className='commute-row';
+      commuteRow.id='commute-'+di+'-'+si;
+      const commute=savedCommutes[si];
+      if(commute){
+        const badge=document.createElement('span');
+        badge.className='commute-badge '+(commute.mode||'drive');
+        badge.textContent=(commute.mode==='walk'?'🚶':'🚗')+' '+commute.time;
+        commuteRow.appendChild(badge);
+        if(commute.note){
+          const note=document.createElement('span');
+          note.style.cssText='font-size:10px;color:var(--muted);margin-left:4px';
+          note.textContent=commute.note;
+          commuteRow.appendChild(note);
+        }
+      } else {
+        commuteRow.innerHTML='<span style="width:1px;height:14px;background:var(--border2);display:inline-block;margin:0 6px"></span>';
+      }
+      list.appendChild(commuteRow);
+    }
   });
 }
 
@@ -1955,101 +1999,168 @@ async function geocodeStop(stop){
 
 
 // ── MAP HELPERS ──
-// Uses OpenStreetMap tile images stitched together via a no-key static map service,
-// with a "Open in Google Maps" link for navigation.
-// For the iframe we use the free maps.google.com/maps?q= embed (no API key needed)
-// which works for single locations, and for multiple stops we build a
-// Google Maps directions URL that opens in a new tab.
+// Single stop → Google Maps iframe embed (no API key needed)
+// Multiple stops → Leaflet.js with OSM tiles, initialised ONLY when container is visible
+// This avoids the grey tile problem by never initialising Leaflet inside a hidden element
 
 function buildStopAddress(stop){
-  return [stop.address, stop.destination, stop.province, stop.postal, stop.country]
+  return [stop.address,stop.destination,stop.province,stop.postal,stop.country]
     .filter(Boolean).join(', ');
 }
 
-// Build a no-API-key Google Maps embed URL for a single location
-function singleLocationEmbedUrl(geocoded){
-  const g = geocoded[0];
-  const stop = g.stop || g.place || {};
-  const q = encodeURIComponent(buildStopAddress(stop) || g.display || '');
-  // maps.google.com/maps?q= embed does NOT require an API key
-  return 'https://maps.google.com/maps?q=' + q + '&output=embed&z=15';
-}
-
-// Build a Google Maps directions URL (opens in new tab) for multiple stops
 function multiStopGoogleMapsUrl(geocoded){
-  const addresses = geocoded.map(function(g){
-    return buildStopAddress(g.stop || g.place || {}) || g.display || '';
+  const addresses=geocoded.map(function(g){
+    return buildStopAddress(g.stop||g.place||{})||g.display||'';
   }).filter(Boolean);
   if(!addresses.length) return null;
-  if(addresses.length === 1) return 'https://maps.google.com/maps?q=' + encodeURIComponent(addresses[0]);
-  const origin = encodeURIComponent(addresses[0]);
-  const dest = encodeURIComponent(addresses[addresses.length - 1]);
-  const waypts = addresses.slice(1, -1).map(encodeURIComponent).join('/');
-  let url = 'https://www.google.com/maps/dir/' + origin + '/';
-  if(waypts) url += waypts + '/';
-  url += dest + '/';
-  return url;
+  if(addresses.length===1) return 'https://maps.google.com/maps?q='+encodeURIComponent(addresses[0]);
+  const parts=addresses.map(encodeURIComponent).join('/');
+  return 'https://www.google.com/maps/dir/'+parts+'/';
+}
+
+function getLeafletContainer(){
+  return document.getElementById('leaflet-map-container');
+}
+
+function resetLeafletMap(){
+  if(leafletMap){
+    leafletMap.remove();
+    leafletMap=null;
+  }
+  const c=getLeafletContainer();
+  if(c){ c.innerHTML=''; c.style.display='none'; }
+}
+
+function initLeafletMap(){
+  resetLeafletMap();
+  const c=getLeafletContainer();
+  if(!c) return null;
+  c.style.display='block';
+  // Create a child div for Leaflet so we can control its size explicitly
+  const mapDiv=document.createElement('div');
+  mapDiv.style.cssText='width:100%;height:460px';
+  c.appendChild(mapDiv);
+  leafletMap=L.map(mapDiv,{zoomControl:true,preferCanvas:false});
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+    attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    maxZoom:19
+  }).addTo(leafletMap);
+  return leafletMap;
+}
+
+function renderLeafletMarkers(map, geocoded, colorHex){
+  const latlngs=[];
+  geocoded.forEach(function(g,i){
+    const stop=g.stop||g.place||{};
+    const num=g.idx!=null?g.idx+1:i+1;
+    const html='<div style="background:'+colorHex+';color:#fff;width:28px;height:28px;border-radius:50%;'+
+      'display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;'+
+      'border:2.5px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.3);font-family:Outfit,sans-serif">'+num+'</div>';
+    const icon=L.divIcon({html:html,className:'',iconSize:[28,28],iconAnchor:[14,14]});
+    const marker=L.marker([g.lat,g.lon],{icon:icon}).addTo(map);
+    const popup=['<strong>'+esc(stop.name||'')+'</strong>'];
+    if(stop.time) popup.push(esc(stop.time));
+    if(stop.address) popup.push('📍 '+esc(stop.address));
+    marker.bindPopup(popup.join('<br>'));
+    latlngs.push([g.lat,g.lon]);
+  });
+  if(latlngs.length>1){
+    L.polyline(latlngs,{color:colorHex,weight:2.5,dashArray:'6 5',opacity:0.7}).addTo(map);
+  }
+  if(latlngs.length===1){
+    map.setView(latlngs[0],15);
+  } else {
+    map.fitBounds(L.latLngBounds(latlngs),{padding:[36,36]});
+  }
+}
+
+function showMultiStopMap(geocoded, colorHex, mapsUrl){
+  const placeholder=document.getElementById('map-placeholder');
+  const iframe=document.getElementById('map-iframe');
+  iframe.style.display='none';
+
+  if(typeof L==='undefined'){
+    // Leaflet not loaded yet — show fallback
+    if(placeholder){
+      placeholder.style.display='flex';
+      placeholder.innerHTML=_multiStopFallback(geocoded, mapsUrl);
+    }
+    return;
+  }
+
+  if(placeholder) placeholder.style.display='none';
+  const map=initLeafletMap();
+  if(!map){
+    if(placeholder){ placeholder.style.display='flex'; placeholder.innerHTML=_multiStopFallback(geocoded,mapsUrl); }
+    return;
+  }
+  renderLeafletMarkers(map, geocoded, colorHex);
+  // invalidateSize after a short delay as a safety net
+  setTimeout(function(){ if(leafletMap) leafletMap.invalidateSize(); }, 300);
+}
+
+function _multiStopFallback(geocoded, mapsUrl){
+  return '<div style="text-align:center;padding:24px">' +
+    '<div style="font-size:36px;margin-bottom:10px">🗺️</div>' +
+    '<div style="font-family:Lora,serif;font-size:16px;color:var(--ink);margin-bottom:6px">'+geocoded.length+' stops planned</div>' +
+    '<div style="font-size:12px;color:var(--muted);margin-bottom:16px;max-width:260px;line-height:1.6">Open in Google Maps to see all stops and get directions.</div>' +
+    (mapsUrl?'<a href="'+mapsUrl+'" target="_blank" rel="noopener" style="display:inline-block;padding:9px 20px;background:var(--accent);color:#fff;border-radius:8px;font-size:13px;font-weight:600;text-decoration:none;font-family:Outfit,sans-serif">Open in Google Maps ↗</a>':'') +
+    '<div style="font-size:11px;color:var(--muted);margin-top:12px;line-height:1.8">'+
+    geocoded.map(function(g,i){ return (i+1)+'. '+esc(g.stop?g.stop.name:(g.place?g.place.name:'Stop '+(i+1))); }).join('<br>')+
+    '</div></div>';
 }
 
 function showMapIframe(geocoded, colorHex){
-  const iframe = document.getElementById('map-iframe');
-  const placeholder = document.getElementById('map-placeholder');
+  const iframe=document.getElementById('map-iframe');
+  const placeholder=document.getElementById('map-placeholder');
+  resetLeafletMap();
   if(!geocoded.length){ hideMapIframe(); return; }
 
-  if(geocoded.length === 1){
-    // Single stop: use no-key Google Maps embed
-    iframe.src = singleLocationEmbedUrl(geocoded);
-    iframe.style.display = 'block';
-    if(placeholder) placeholder.style.display = 'none';
+  if(geocoded.length===1){
+    // Single stop: use no-key Google Maps iframe embed
+    const stop=geocoded[0].stop||geocoded[0].place||{};
+    const q=encodeURIComponent(buildStopAddress(stop)||geocoded[0].display||'');
+    iframe.src='https://maps.google.com/maps?q='+q+'&output=embed&z=15';
+    iframe.style.display='block';
+    if(placeholder) placeholder.style.display='none';
+    const c=getLeafletContainer();
+    if(c) c.style.display='none';
   } else {
-    // Multiple stops: can't embed directions without an API key
-    // Show a styled placeholder with a button that opens Google Maps in a new tab
-    const mapsUrl = multiStopGoogleMapsUrl(geocoded);
-    if(placeholder){
-      placeholder.style.display = 'flex';
-      placeholder.innerHTML =
-        '<div style="text-align:center;padding:24px">' +
-        '<div style="font-size:36px;margin-bottom:12px">🗺️</div>' +
-        '<div style="font-family:Lora,serif;font-size:17px;color:var(--ink);margin-bottom:8px">' +
-          geocoded.length + ' stops mapped' +
-        '</div>' +
-        '<div style="font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.6;max-width:280px">' +
-          'Multi-stop directions open in Google Maps for the best experience.' +
-        '</div>' +
-        (mapsUrl ?
-          '<a href="' + mapsUrl + '" target="_blank" rel="noopener" ' +
-          'style="display:inline-block;padding:10px 22px;background:var(--accent);color:#fff;' +
-          'border-radius:8px;font-size:13px;font-weight:600;text-decoration:none;' +
-          'font-family:Outfit,sans-serif">Open route in Google Maps ↗</a>' : '') +
-        '<div style="font-size:11px;color:var(--muted);margin-top:14px">' +
-          geocoded.map(function(g,i){
-            return (i+1)+'. '+(g.stop?g.stop.name:(g.place?g.place.name:'Stop '+(i+1)));
-          }).join(' → ') +
-        '</div>' +
-        '</div>';
+    // Multiple stops: use Leaflet for in-app view + link for navigation
+    const mapsUrl=multiStopGoogleMapsUrl(geocoded);
+    showMultiStopMap(geocoded, colorHex, mapsUrl);
+    // Add a small "Open in Google Maps" link to the map sidebar
+    const sidebar=document.getElementById('map-stop-list');
+    if(sidebar&&mapsUrl){
+      const link=document.createElement('a');
+      link.href=mapsUrl;
+      link.target='_blank';
+      link.rel='noopener';
+      link.textContent='↗ Open route in Google Maps';
+      link.style.cssText='display:block;font-size:11px;color:var(--accent);margin-top:10px;text-decoration:none;padding:6px 0;border-top:1px solid var(--border)';
+      sidebar.appendChild(link);
     }
-    iframe.style.display = 'none';
   }
 }
 
 function hideMapIframe(){
-  const iframe = document.getElementById('map-iframe');
-  if(iframe){ iframe.src = 'about:blank'; iframe.style.display = 'none'; }
-  const placeholder = document.getElementById('map-placeholder');
+  resetLeafletMap();
+  const iframe=document.getElementById('map-iframe');
+  if(iframe){ iframe.src='about:blank'; iframe.style.display='none'; }
+  const placeholder=document.getElementById('map-placeholder');
   if(placeholder){
-    placeholder.style.display = 'flex';
-    // Restore original placeholder content if it was replaced
+    placeholder.style.display='flex';
     if(!placeholder.querySelector('.map-placeholder-icon')){
-      placeholder.innerHTML =
-        '<div class="map-placeholder-icon">🗺️</div>' +
-        '<div class="map-placeholder-title">Map view</div>' +
+      placeholder.innerHTML=
+        '<div class="map-placeholder-icon">🗺️</div>'+
+        '<div class="map-placeholder-title">Map view</div>'+
         '<div class="map-placeholder-sub" id="map-placeholder-sub">Select a day to see stops on the map.</div>';
     }
   }
 }
 
-// Aliases so existing callers work unchanged
-function showLeafletMap(geocoded, colorHex, labelFn){ showMapIframe(geocoded, colorHex); }
+// Aliases
+function showLeafletMap(geocoded,colorHex,labelFn){ showMapIframe(geocoded,colorHex); }
 function hideLeafletMap(){ hideMapIframe(); }
 function destroyLeafletMap(){ hideMapIframe(); }
 
@@ -2467,6 +2578,74 @@ function openEditPlaceModal(idx){
 }
 
 // ═══════════════════════════════════════════
+// COMMUTE TIMES
+// ═══════════════════════════════════════════
+async function getCommuteTimes(di){
+  const day=trip.days[di];
+  if(day.stops.length<2){
+    toast('Add at least 2 stops to calculate commute times');
+    return;
+  }
+  const btn=document.getElementById('commute-btn-'+di);
+  if(btn){ btn.textContent='⏳ Loading…'; btn.disabled=true; }
+
+  // Show loading state in commute rows
+  for(var i=0;i<day.stops.length-1;i++){
+    const row=document.getElementById('commute-'+di+'-'+i);
+    if(row) row.innerHTML='<span class="commute-loading">Calculating…</span>';
+  }
+
+  const stopList=day.stops.map(function(s,i){
+    const loc=[s.name,s.address,s.destination,s.province,s.country].filter(Boolean).join(', ');
+    return (i+1)+'. '+loc;
+  }).join('\n');
+
+  const prompt=[
+    'You are a travel logistics expert. Estimate realistic commute times between consecutive stops for a traveller.',
+    '',
+    'Stops for Day '+day.day+':',
+    stopList,
+    '',
+    'For each consecutive pair of stops, estimate:',
+    '- Most likely travel mode (walk if under ~20 min walking, drive/transit otherwise)',
+    '- Realistic travel time accounting for the locations',
+    '- A very brief note if relevant (e.g. via subway, in traffic, uphill)',
+    '',
+    'Return ONLY a valid JSON array with one entry per consecutive pair (so '+(day.stops.length-1)+' entries total), no markdown:',
+    '[{"from":1,"to":2,"mode":"walk","time":"12 min","note":"flat route"},{"from":2,"to":3,"mode":"drive","time":"8 min","note":""}]'
+  ].join('\n');
+
+  try{
+    const raw=await callClaude(prompt,600);
+    const items=JSON.parse(raw.replace(/```json|```/g,'').trim());
+    if(!trip._commutes) trip._commutes={};
+    const key='commutes-day-'+di;
+    trip._commutes[key]=[];
+    items.forEach(function(item,i){
+      trip._commutes[key][i]={
+        mode:item.mode||'drive',
+        time:item.time||'',
+        note:item.note||''
+      };
+    });
+    scheduleSave();
+    renderStopsInDay(di);
+    toast('Commute times updated ✓');
+  }catch(e){
+    // Clear loading state on error
+    for(var i=0;i<day.stops.length-1;i++){
+      const row=document.getElementById('commute-'+di+'-'+i);
+      if(row) row.innerHTML='<span style="width:1px;height:14px;background:var(--border2);display:inline-block;margin:0 6px"></span>';
+    }
+    const isFile=window.location.protocol==='file:';
+    toast(isFile?'AI features need the hosted version':'Could not calculate commute times — try again');
+    console.error(e);
+  }finally{
+    if(btn){ btn.textContent='🚗 Commute'; btn.disabled=false; }
+  }
+}
+
+// ═══════════════════════════════════════════
 // TOAST
 // ═══════════════════════════════════════════
 let toastTimer;
@@ -2488,5 +2667,6 @@ function toast(msg){
   }
 })();
 </script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 </body>
 </html>
