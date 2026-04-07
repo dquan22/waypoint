@@ -360,6 +360,21 @@ input,select,textarea{font-family:'Outfit',sans-serif}
   .places-map-frame{height:300px}
 }
 
+
+/* ── COST BADGE ── */
+.cost-badge{font-size:10px;background:#fef9ee;color:#92400e;border:1px solid #fcd34d;padding:2px 7px;border-radius:10px;font-weight:600;white-space:nowrap}
+/* ── MULTI-FILTER BAR ── */
+.filter-bar{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
+.filter-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.filter-row-label{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;min-width:36px;flex-shrink:0}
+/* ── SHOW MAP BUTTON ── */
+.btn-show-map{padding:9px 20px;background:var(--ink);color:#fff;border:none;border-radius:var(--radius);font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:7px;transition:all .15s;font-family:'Outfit',sans-serif}
+.btn-show-map:hover{background:#2e2b25}
+.btn-show-map:disabled{background:var(--muted);cursor:not-allowed}
+/* ── LEAFLET INSIDE MAP SECTION ── */
+#places-leaflet-map{width:100%;height:100%;display:none}
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
 </style>
 </head>
 <body>
@@ -470,13 +485,28 @@ input,select,textarea{font-family:'Outfit',sans-serif}
 
     <div class="tab-content" id="tab-places">
 
-      <!-- Toolbar: count + filters + add button -->
+      <!-- Toolbar: add button + place count -->
       <div class="places-toolbar">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex:1">
           <div class="places-count" id="places-count">0 places saved</div>
-          <div class="places-filter" id="places-filter"></div>
         </div>
         <button class="btn-outline" onclick="toggleAddPlaceForm()">+ Add place</button>
+      </div>
+
+      <!-- Multi-row filter bar -->
+      <div class="filter-bar" id="places-filter-bar">
+        <div class="filter-row">
+          <span class="filter-row-label">Type</span>
+          <div id="filter-type" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+        </div>
+        <div class="filter-row">
+          <span class="filter-row-label">City</span>
+          <div id="filter-city" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+        </div>
+        <div class="filter-row">
+          <span class="filter-row-label">Cost</span>
+          <div id="filter-cost" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+        </div>
       </div>
 
       <!-- Add place form (hidden by default) -->
@@ -496,7 +526,16 @@ input,select,textarea{font-family:'Outfit',sans-serif}
           <input class="add-input" id="pp-province" placeholder="Province / State" />
           <input class="add-input" id="pp-country" placeholder="Country" />
         </div>
-        <input class="add-input" id="pp-notes" placeholder="Notes (optional)" style="margin-bottom:9px;display:block;width:100%" />
+        <div class="add-row add-row-2" style="margin-bottom:9px">
+          <select class="add-input" id="pp-cost">
+            <option value="">Cost (optional)</option>
+            <option value="$1 - $10">$1 - $10</option>
+            <option value="$10 - $25">$10 - $25</option>
+            <option value="$25 - $50">$25 - $50</option>
+            <option value="$50+">$50+</option>
+          </select>
+          <input class="add-input" id="pp-notes" placeholder="Notes (optional)" />
+        </div>
         <div class="add-actions">
           <button class="btn-cancel-stop" onclick="toggleAddPlaceForm()">Cancel</button>
           <button class="btn-add-stop" onclick="confirmAddPlace()">Save place</button>
@@ -508,27 +547,29 @@ input,select,textarea{font-family:'Outfit',sans-serif}
         <div class="places-carousel" id="places-carousel">
           <div class="places-empty" style="grid-column:1/-1">
             <div class="places-empty-icon">📌</div>
-            <div class="places-empty-text">No places saved yet.<br>Add places to see them on the map below.</div>
+            <div class="places-empty-text">No places saved yet.<br>Add places, then use "Show on map" to see them.</div>
           </div>
         </div>
       </div>
 
-      <!-- Places map section -->
+      <!-- Places map section — hidden until user clicks Show on map -->
       <div class="places-map-section" id="places-map-section">
         <div class="places-map-header">
-          <div style="font-weight:600;font-size:13px;color:var(--ink2)">📍 Places on map</div>
-          <div class="places-map-status" id="places-map-status"></div>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <button class="btn-show-map" id="btn-show-map" onclick="triggerPlacesMap()">🗺 Show on map</button>
+            <div class="places-map-status" id="places-map-status" style="font-size:12px;color:var(--muted)"></div>
+          </div>
         </div>
-        <div class="places-map-wrap">
+        <div class="places-map-wrap" id="places-map-wrap" style="display:none">
           <div class="places-map-legend" id="places-map-legend">
-            <div style="font-size:11px;color:var(--muted);padding:8px">Select a filter or add places to see them on the map.</div>
+            <div style="font-size:11px;color:var(--muted);padding:8px">Click "Show on map" to plot filtered places.</div>
           </div>
           <div class="places-map-frame">
             <div class="places-map-placeholder" id="places-map-placeholder">
               <div style="font-size:32px;margin-bottom:8px">🗺️</div>
-              <div style="font-size:13px;color:var(--muted)">Add places with location data to see them here.</div>
+              <div style="font-size:13px;color:var(--muted)">Click "Show on map" above.</div>
             </div>
-            <canvas id="places-map-canvas" style="width:100%;height:100%;display:none;border-radius:var(--radius-lg)"></canvas>
+            <div id="places-leaflet-map" style="width:100%;height:100%;display:none"></div>
           </div>
         </div>
       </div>
@@ -619,6 +660,16 @@ input,select,textarea{font-family:'Outfit',sans-serif}
     <div class="edit-modal-grid">
       <div class="mfg"><label>Time</label><input type="text" id="es-time" placeholder="e.g. 10:00 AM" /></div>
       <div class="mfg"><label>Duration</label><input type="text" id="es-dur" placeholder="e.g. ~2 hours" /></div>
+      <div class="mfg">
+        <label>Cost</label>
+        <select id="es-cost">
+          <option value="">Not listed</option>
+          <option value="$1 - $10">$1 - $10</option>
+          <option value="$10 - $25">$10 - $25</option>
+          <option value="$25 - $50">$25 - $50</option>
+          <option value="$50+">$50+</option>
+        </select>
+      </div>
     </div>
     <div class="edit-modal-grid">
       <div class="mfg">
@@ -1072,8 +1123,15 @@ function buildDayBlock(di){
           <input class="add-input" id="apostal-${di}" placeholder="Postal / ZIP code" />
           <input class="add-input" id="acountry-${di}" placeholder="Country" />
         </div>
-        <div class="add-row add-row-2">
+        <div class="add-row add-row-3">
           <input class="add-input" id="adur-${di}" placeholder="Duration (e.g. ~2 hours)" />
+          <select class="add-input" id="acost-${di}">
+            <option value="">Cost (optional)</option>
+            <option value="$1 - $10">$1 - $10</option>
+            <option value="$10 - $25">$10 - $25</option>
+            <option value="$25 - $50">$25 - $50</option>
+            <option value="$50+">$50+</option>
+          </select>
           <input class="add-input" id="ano-${di}" placeholder="Notes (optional)" />
         </div>
         <div class="add-actions">
@@ -1117,6 +1175,7 @@ function renderStopsInDay(di,wrap){
           ${s.time?`<span class="stop-time">${esc(s.time)}</span>`:''}
           <span class="stop-badge">${s.type||'📍 Other'}</span>
           ${s.duration?`<span class="stop-badge">⏱ ${esc(s.duration)}</span>`:''}
+          ${s.cost?`<span class="cost-badge">${esc(s.cost)}</span>`:''}
           ${s.destination?`<span class="dest-badge">📍 ${esc(s.destination)}</span>`:''}
         </div>
         ${s.notes?`<div class="stop-notes">${esc(s.notes)}</div>`:''}
@@ -1189,12 +1248,13 @@ function confirmAddStop(di){
     postal:document.getElementById('apostal-'+di).value.trim(),
     country:document.getElementById('acountry-'+di).value.trim(),
     duration:document.getElementById('adur-'+di).value.trim(),
+    cost:document.getElementById('acost-'+di).value,
     notes:document.getElementById('ano-'+di).value.trim(),
     ai:false
   });
   renderStopsInDay(di);
   closeAddForm(di);
-  ['an','atm','adr','adest','aprovince','apostal','acountry','adur','ano'].forEach(function(p){
+  ['an','atm','adr','adest','aprovince','apostal','acountry','adur','acost','ano'].forEach(function(p){
     const el=document.getElementById(p+'-'+di);
     if(el) el.value='';
   });
@@ -1221,6 +1281,7 @@ function openEditStopModal(di,si){
   document.getElementById('es-name').value=s.name||'';
   document.getElementById('es-time').value=s.time||'';
   document.getElementById('es-dur').value=s.duration||'';
+  document.getElementById('es-cost').value=s.cost||'';
   document.getElementById('es-type').value=s.type||'📍 Other';
   document.getElementById('es-dest').value=s.destination||'';
   document.getElementById('es-addr').value=s.address||'';
@@ -1246,6 +1307,7 @@ function saveStopEdit(){
     p.province=document.getElementById('es-province').value.trim();
     p.postal=document.getElementById('es-postal').value.trim();
     p.country=document.getElementById('es-country').value.trim();
+    p.cost=document.getElementById('es-cost').value||'';
     p.notes=document.getElementById('es-notes').value.trim();
     editingPlaceIdx=null;
     renderPlaces();
@@ -1261,6 +1323,7 @@ function saveStopEdit(){
   s.name=document.getElementById('es-name').value.trim()||s.name;
   s.time=document.getElementById('es-time').value.trim();
   s.duration=document.getElementById('es-dur').value.trim();
+  s.cost=document.getElementById('es-cost').value;
   s.type=document.getElementById('es-type').value;
   s.destination=document.getElementById('es-dest').value.trim();
   s.address=document.getElementById('es-addr').value.trim();
@@ -2075,117 +2138,100 @@ function openDayRoute(di){
 }
 
 // ═══════════════════════════════════════════
-// PLACES MAP
+// PLACES MAP — Leaflet initialised on explicit button click only
+// Container is guaranteed visible at click time → no grey tile problem
 // ═══════════════════════════════════════════
-let placesMapFilter='All';
+let placesLeafletMap = null;
+let placesLeafletMarkers = [];
 
-// Build an OSM iframe URL that shows a bounding box of all geocoded places.
-// The iframe shows the map area reliably — numbered pins are shown in the legend sidebar.
-// ═══════════════════════════════════════════
-// PLACES MAP — canvas + OSM tiles
-// Draws OSM tile images onto a canvas and overlays numbered markers.
-// No external library needed. Works on file://, GitHub Pages, everywhere.
-// ═══════════════════════════════════════════
-
-// Convert lat/lon to OSM tile coordinates at a given zoom level
-function latLonToTile(lat, lon, zoom){
-  var n = Math.pow(2, zoom);
-  var x = Math.floor((lon + 180) / 360 * n);
-  var latRad = lat * Math.PI / 180;
-  var y = Math.floor((1 - Math.log(Math.tan(latRad) + 1/Math.cos(latRad)) / Math.PI) / 2 * n);
-  return {x:x, y:y};
-}
-
-// Convert lat/lon to pixel position within a tile grid
-function latLonToPixel(lat, lon, zoom, tileSize, originTile){
-  var n = Math.pow(2, zoom);
-  var px = (lon + 180) / 360 * n * tileSize - originTile.x * tileSize;
-  var latRad = lat * Math.PI / 180;
-  var py = (1 - Math.log(Math.tan(latRad) + 1/Math.cos(latRad)) / Math.PI) / 2 * n * tileSize - originTile.y * tileSize;
-  return {x:px, y:py};
-}
-
-// Pick a zoom level that fits all points in the canvas
-function choosZoom(minLat, maxLat, minLon, maxLon, canvasW, canvasH, tileSize){
-  for(var z = 16; z >= 1; z--){
-    var tMin = latLonToTile(maxLat, minLon, z);
-    var tMax = latLonToTile(minLat, maxLon, z);
-    var tilesW = tMax.x - tMin.x + 1;
-    var tilesH = tMax.y - tMin.y + 1;
-    if(tilesW * tileSize <= canvasW * 1.5 && tilesH * tileSize <= canvasH * 1.5){
-      return z;
-    }
-  }
-  return 2;
-}
-
-async function renderPlacesMap(){
-  const canvas = document.getElementById('places-map-canvas');
-  const placeholder = document.getElementById('places-map-placeholder');
-  const legend = document.getElementById('places-map-legend');
+function resetPlacesMap(){
+  // Called when filters change — hide the map so user must re-click Show on map
+  const wrap = document.getElementById('places-map-wrap');
+  if(wrap) wrap.style.display = 'none';
+  const btn = document.getElementById('btn-show-map');
+  if(btn){ btn.textContent = '🗺 Show on map'; btn.disabled = false; }
   const statusEl = document.getElementById('places-map-status');
-  if(!canvas || !trip) return;
+  if(statusEl) statusEl.textContent = '';
+  // Destroy existing Leaflet map so it reinitialises fresh next time
+  if(placesLeafletMap){
+    placesLeafletMap.remove();
+    placesLeafletMap = null;
+    placesLeafletMarkers = [];
+    const container = document.getElementById('places-leaflet-map');
+    if(container) container.innerHTML = '';
+  }
+}
 
-  if(!trip.places || !trip.places.length){
-    canvas.style.display='none';
-    if(placeholder) placeholder.style.display='flex';
-    if(legend) legend.innerHTML='<div style="font-size:11px;color:var(--muted);padding:8px">No places added yet.</div>';
-    if(statusEl) statusEl.textContent='';
+async function triggerPlacesMap(){
+  if(!trip || !trip.places || !trip.places.length){
+    toast('Add some places first');
     return;
   }
 
-  const filtered = placesMapFilter==='All'
-    ? trip.places
-    : trip.places.filter(function(p){ return (p.type||'📍 Other')===placesMapFilter; });
+  // Apply current filters to get the subset to map
+  const filtered = trip.places.filter(function(p){
+    if(placeFilterType !== 'All' && (p.type||'📍 Other') !== placeFilterType) return false;
+    if(placeFilterCity !== 'All' && (p.destination||'') !== placeFilterCity) return false;
+    if(placeFilterCost !== 'All' && (p.cost||'') !== placeFilterCost) return false;
+    return true;
+  });
 
   if(!filtered.length){
-    canvas.style.display='none';
-    if(placeholder){ placeholder.style.display='flex'; }
-    if(legend) legend.innerHTML='<div style="font-size:11px;color:var(--muted);padding:8px">No places match this filter.</div>';
-    if(statusEl) statusEl.textContent='';
+    toast('No places match the current filters');
     return;
   }
 
-  var totalToGeocode = filtered.length;
-  if(statusEl) statusEl.textContent = 'Locating '+totalToGeocode+' place'+(totalToGeocode!==1?'s':'')+'… (may take a moment)';
-  if(legend) legend.innerHTML='<div style="font-size:11px;color:var(--muted);padding:8px;font-style:italic">Locating places…</div>';
+  const btn = document.getElementById('btn-show-map');
+  const statusEl = document.getElementById('places-map-status');
+  const wrap = document.getElementById('places-map-wrap');
+  const legend = document.getElementById('places-map-legend');
+  const placeholder = document.getElementById('places-map-placeholder');
+  const mapContainer = document.getElementById('places-leaflet-map');
 
-  // Geocode all filtered places — small delay between calls to respect Nominatim rate limit
-  var geocoded = [];
-  for(var i=0; i<filtered.length; i++){
+  if(btn){ btn.disabled = true; btn.textContent = '⏳ Locating places…'; }
+  if(wrap) wrap.style.display = 'grid';
+
+  // Geocode with progress updates
+  const geocoded = [];
+  for(var i = 0; i < filtered.length; i++){
+    if(statusEl) statusEl.textContent = 'Locating ' + (i+1) + ' of ' + filtered.length + '…';
     try{
-      var result = await geocodeStop(filtered[i]);
+      const result = await geocodeStop(filtered[i]);
       if(result && result.lat && result.lon){
-        geocoded.push({place:filtered[i], idx:i, lat:result.lat, lon:result.lon});
+        geocoded.push({place: filtered[i], idx: i, lat: result.lat, lon: result.lon});
       }
     }catch(e){ console.warn('Geocode failed:', filtered[i].name, e); }
-    // Nominatim usage policy: max 1 request/second
     if(i < filtered.length - 1){
       await new Promise(function(r){ setTimeout(r, 1100); });
     }
   }
 
+  const failCount = filtered.length - geocoded.length;
+  if(statusEl) statusEl.textContent = geocoded.length + ' of ' + filtered.length + ' located'
+    + (failCount ? ' · ' + failCount + ' need location data' : ' ✓');
+
   // Build legend
   if(legend){
-    legend.innerHTML='';
-    filtered.forEach(function(p,i){
-      var found = geocoded.find(function(g){return g.idx===i;});
-      var item = document.createElement('div');
-      item.className='places-map-legend-item';
-      var num = document.createElement('div');
-      num.className='places-map-legend-num';
+    legend.innerHTML = '';
+    filtered.forEach(function(p, i){
+      const found = geocoded.find(function(g){ return g.idx === i; });
+      const item = document.createElement('div');
+      item.className = 'places-map-legend-item';
+      const num = document.createElement('div');
+      num.className = 'places-map-legend-num';
       num.style.background = found ? '#7c3aed' : 'var(--muted)';
-      num.textContent = i+1;
-      var info = document.createElement('div');
-      info.className='places-map-legend-info';
-      var name = document.createElement('div');
-      name.className='places-map-legend-name';
+      num.textContent = i + 1;
+      const info = document.createElement('div');
+      info.className = 'places-map-legend-info';
+      const name = document.createElement('div');
+      name.className = 'places-map-legend-name';
       name.textContent = p.name;
       name.style.opacity = found ? '1' : '0.45';
       name.title = found ? '' : 'No location found — add city and country';
-      var sub = document.createElement('div');
-      sub.className='places-map-legend-sub';
-      sub.textContent = [p.type, p.destination].filter(Boolean).join(' · ')||'';
+      const sub = document.createElement('div');
+      sub.className = 'places-map-legend-sub';
+      const subParts = [p.type, p.destination, p.cost].filter(Boolean);
+      sub.textContent = subParts.join(' · ');
       info.appendChild(name);
       info.appendChild(sub);
       item.appendChild(num);
@@ -2194,152 +2240,64 @@ async function renderPlacesMap(){
     });
   }
 
-  var failCount = filtered.length - geocoded.length;
-  if(statusEl){
-    statusEl.textContent = geocoded.length + ' of ' + filtered.length + ' located'
-      + (failCount ? ' ('+failCount+' need location data)' : '');
-  }
-
   if(!geocoded.length){
-    canvas.style.display='none';
     if(placeholder){
-      placeholder.style.display='flex';
-      placeholder.innerHTML='<div style="font-size:13px;color:var(--muted);text-align:center;padding:20px">'
-        +'No places could be located.<br><span style="font-size:11px">Add city, province, and country to each place.</span></div>';
+      placeholder.style.display = 'flex';
+      placeholder.innerHTML = '<div style="font-size:13px;color:var(--muted);text-align:center;padding:20px">'
+        + 'No places could be located.<br><span style="font-size:11px">Add city, province, and country to each place.</span></div>';
     }
+    if(btn){ btn.disabled = false; btn.textContent = '🗺 Show on map'; }
     return;
   }
 
-  // Calculate bounding box with padding
-  var lats = geocoded.map(function(g){return g.lat;});
-  var lons = geocoded.map(function(g){return g.lon;});
-  var minLat = Math.min.apply(null,lats);
-  var maxLat = Math.max.apply(null,lats);
-  var minLon = Math.min.apply(null,lons);
-  var maxLon = Math.max.apply(null,lons);
-  var pad = Math.max(0.01, Math.max(maxLat-minLat, maxLon-minLon) * 0.3);
-  minLat -= pad; maxLat += pad;
-  minLon -= pad; maxLon += pad;
-
-  // Set canvas dimensions to match its display size
-  var rect = canvas.parentElement.getBoundingClientRect();
-  var W = Math.max(rect.width || 600, 400);
-  var H = Math.max(rect.height || 400, 300);
-  canvas.width = W;
-  canvas.height = H;
-  canvas.style.display = 'block';
+  // Render Leaflet map — container is visible right now, guaranteed
   if(placeholder) placeholder.style.display = 'none';
+  if(mapContainer){ mapContainer.style.display = 'block'; mapContainer.innerHTML = ''; }
 
-  var ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#e8e0d8';
-  ctx.fillRect(0, 0, W, H);
-
-  var TILE = 256;
-  var zoom = choosZoom(minLat, maxLat, minLon, maxLon, W, H, TILE);
-
-  // Origin tile (top-left of our viewport)
-  var originTile = latLonToTile(maxLat, minLon, zoom);
-  var endTile = latLonToTile(minLat, maxLon, zoom);
-
-  // Calculate pixel offset to centre the bounding box in the canvas
-  var totalTilesW = endTile.x - originTile.x + 1;
-  var totalTilesH = endTile.y - originTile.y + 1;
-  var totalPxW = totalTilesW * TILE;
-  var totalPxH = totalTilesH * TILE;
-  var offsetX = Math.round((W - totalPxW) / 2);
-  var offsetY = Math.round((H - totalPxH) / 2);
-
-  // Load and draw all tiles
-  var tilePromises = [];
-  var subdomains = ['a','b','c'];
-  for(var tx = originTile.x; tx <= endTile.x; tx++){
-    for(var ty = originTile.y; ty <= endTile.y; ty++){
-      (function(tx, ty){
-        var sub = subdomains[(tx + ty) % 3];
-        var url = 'https://'+sub+'.tile.openstreetmap.org/'+zoom+'/'+tx+'/'+ty+'.png';
-        var px = offsetX + (tx - originTile.x) * TILE;
-        var py = offsetY + (ty - originTile.y) * TILE;
-        var p = new Promise(function(resolve){
-          var img = new Image();
-          img.crossOrigin = 'anonymous';
-          img.onload = function(){ ctx.drawImage(img, px, py, TILE, TILE); resolve(); };
-          img.onerror = function(){
-            // Draw placeholder tile on error
-            ctx.fillStyle='#ddd8d0';
-            ctx.fillRect(px, py, TILE, TILE);
-            ctx.strokeStyle='#ccc';
-            ctx.strokeRect(px, py, TILE, TILE);
-            resolve();
-          };
-          img.src = url;
-        });
-        tilePromises.push(p);
-      })(tx, ty);
+  if(typeof L === 'undefined'){
+    if(placeholder){
+      placeholder.style.display = 'flex';
+      placeholder.innerHTML = '<div style="font-size:13px;color:var(--muted)">Map library not loaded. Check your internet connection.</div>';
     }
+    if(btn){ btn.disabled = false; btn.textContent = '🗺 Show on map'; }
+    return;
   }
 
-  // Wait for all tiles, then draw markers on top
-  await Promise.all(tilePromises);
+  placesLeafletMap = L.map('places-leaflet-map', {zoomControl: true});
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>',
+    maxZoom: 19
+  }).addTo(placesLeafletMap);
 
-  // Draw connecting polyline between stops
-  if(geocoded.length > 1){
-    ctx.beginPath();
-    geocoded.forEach(function(g, i){
-      var pix = latLonToPixel(g.lat, g.lon, zoom, TILE, originTile);
-      var px = offsetX + pix.x;
-      var py = offsetY + pix.y;
-      if(i===0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-    });
-    ctx.strokeStyle = '#7c3aed';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([6,4]);
-    ctx.globalAlpha = 0.7;
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-    ctx.setLineDash([]);
-    ctx.lineWidth = 1;
-  }
-
-  // Draw markers
-  var R = 13;
+  const latlngs = [];
   geocoded.forEach(function(g, i){
-    var pix = latLonToPixel(g.lat, g.lon, zoom, TILE, originTile);
-    var px = offsetX + pix.x;
-    var py = offsetY + pix.y;
-    var num = g.idx + 1;
-
-    // Shadow
-    ctx.beginPath();
-    ctx.arc(px, py+2, R+1, 0, Math.PI*2);
-    ctx.fillStyle = 'rgba(0,0,0,0.2)';
-    ctx.fill();
-
-    // Circle
-    ctx.beginPath();
-    ctx.arc(px, py, R, 0, Math.PI*2);
-    ctx.fillStyle = '#7c3aed';
-    ctx.fill();
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 2.5;
-    ctx.stroke();
-    ctx.lineWidth = 1;
-
-    // Number
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 11px Outfit,Arial,sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(String(num), px, py);
+    const p = g.place || {};
+    const num = g.idx + 1;
+    const icon = L.divIcon({
+      html: '<div style="background:#7c3aed;color:#fff;width:26px;height:26px;border-radius:50%;'
+        + 'display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;'
+        + 'border:2.5px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.3);font-family:Outfit,sans-serif">'
+        + num + '</div>',
+      className: '', iconSize: [26,26], iconAnchor: [13,13]
+    });
+    const mk = L.marker([g.lat, g.lon], {icon: icon}).addTo(placesLeafletMap);
+    const parts = ['<strong>' + esc(p.name||'') + '</strong>'];
+    if(p.type) parts.push('<span style="font-size:11px;color:#555">' + esc(p.type) + '</span>');
+    if(p.cost) parts.push('<span style="font-size:11px;color:#92400e;font-weight:600">' + esc(p.cost) + '</span>');
+    if(p.address || p.destination) parts.push('<span style="font-size:11px;color:#059669">📍 '
+      + esc([p.address, p.destination].filter(Boolean).join(', ')) + '</span>');
+    mk.bindPopup(parts.join('<br>'));
+    placesLeafletMarkers.push(mk);
+    latlngs.push([g.lat, g.lon]);
   });
 
-  // OSM attribution
-  ctx.fillStyle = 'rgba(255,255,255,0.75)';
-  ctx.fillRect(W-160, H-18, 160, 18);
-  ctx.fillStyle = '#666';
-  ctx.font = '10px Arial,sans-serif';
-  ctx.textAlign = 'right';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('© OpenStreetMap contributors', W-4, H-9);
+  if(latlngs.length === 1){
+    placesLeafletMap.setView(latlngs[0], 15);
+  } else {
+    placesLeafletMap.fitBounds(L.latLngBounds(latlngs), {padding: [40, 40]});
+  }
+
+  if(btn){ btn.disabled = false; btn.textContent = '↻ Refresh map'; }
 }
 
 
@@ -2447,106 +2405,127 @@ async function geocodeStop(stop){
 // PLACES
 // ═══════════════════════════════════════════
 let placeFilterType = 'All';
+let placeFilterCity = 'All';
+let placeFilterCost = 'All';
 let draggedPlaceIdx = null;
 let dayPickerPlaceIdx = null;
 
 function renderPlaces(){
   if(!trip) return;
   if(!trip.places) trip.places=[];
+  const places=trip.places;
 
-  const carousel = document.getElementById('places-carousel');
-  const countEl = document.getElementById('places-count');
+  const carousel=document.getElementById('places-carousel');
+  const countEl=document.getElementById('places-count');
   if(!carousel) return;
 
-  const places = trip.places;
-  if(countEl) countEl.textContent = places.length + ' place' + (places.length!==1?'s':'') + ' saved';
-
-  // Sync filter state between cards and map
-  // placeFilterType drives the cards; placesMapFilter drives the map
-  // Keep them in sync
-  placesMapFilter = placeFilterType;
-
-  // Build type filter pills
-  const filterEl = document.getElementById('places-filter');
-  if(filterEl){
-    const types = ['All', ...new Set(places.map(function(p){ return p.type||'📍 Other'; }))];
-    filterEl.innerHTML = '';
-    types.forEach(function(t){
-      const btn = document.createElement('button');
-      btn.className = 'filter-pill' + (placeFilterType===t?' active':'');
-      btn.textContent = t;
-      btn.onclick = function(){
-        placeFilterType=t;
-        placesMapFilter=t;
+  // ── Build filter pills ──
+  function makePills(containerId, values, activeVal, setter){
+    const el=document.getElementById(containerId);
+    if(!el) return;
+    el.innerHTML='';
+    ['All',...values].forEach(function(v){
+      const btn=document.createElement('button');
+      btn.className='filter-pill'+(activeVal===v?' active':'');
+      btn.textContent=v;
+      btn.onclick=function(){
+        setter(v);
         renderPlaces();
+        // Reset map when filters change
+        resetPlacesMap();
       };
-      filterEl.appendChild(btn);
+      el.appendChild(btn);
     });
   }
 
-  const filtered = placeFilterType==='All'
-    ? places
-    : places.filter(function(p){ return (p.type||'📍 Other')===placeFilterType; });
+  const types=[...new Set(places.map(function(p){return p.type||'📍 Other';}))].sort();
+  const cities=[...new Set(places.map(function(p){return p.destination||'';}).filter(Boolean))].sort();
+  const costs=['$1 - $10','$10 - $25','$25 - $50','$50+'].filter(function(c){
+    return places.some(function(p){return p.cost===c;});
+  });
+
+  makePills('filter-type', types, placeFilterType, function(v){placeFilterType=v;});
+  makePills('filter-city', cities, placeFilterCity, function(v){placeFilterCity=v;});
+  makePills('filter-cost', costs, placeFilterCost, function(v){placeFilterCost=v;});
+
+  // ── Apply all filters ──
+  const filtered=places.filter(function(p){
+    if(placeFilterType!=='All' && (p.type||'📍 Other')!==placeFilterType) return false;
+    if(placeFilterCity!=='All' && (p.destination||'')!==placeFilterCity) return false;
+    if(placeFilterCost!=='All' && (p.cost||'')!==placeFilterCost) return false;
+    return true;
+  });
+
+  if(countEl) countEl.textContent=filtered.length+' of '+places.length+' place'+(places.length!==1?'s':'');
 
   if(!filtered.length){
-    carousel.innerHTML = places.length
-      ? '<div class="places-empty" style="grid-column:1/-1"><div class="places-empty-icon">🔍</div><div class="places-empty-text">No places match this filter.</div></div>'
-      : '<div class="places-empty" style="grid-column:1/-1"><div class="places-empty-icon">📌</div><div class="places-empty-text">No places saved yet.<br>Add places to see them on the map below.</div></div>';
-    renderPlacesMap();
+    carousel.innerHTML=places.length
+      ? '<div class="places-empty" style="grid-column:1/-1"><div class="places-empty-icon">🔍</div><div class="places-empty-text">No places match these filters.</div></div>'
+      : '<div class="places-empty" style="grid-column:1/-1"><div class="places-empty-icon">📌</div><div class="places-empty-text">No places saved yet.</div></div>';
     return;
   }
 
-  carousel.innerHTML = '';
+  carousel.innerHTML='';
   filtered.forEach(function(place){
-    const realIdx = trip.places.indexOf(place);
-    const card = document.createElement('div');
-    card.className = 'place-card';
-    card.draggable = true;
-    card.dataset.idx = realIdx;
+    const realIdx=trip.places.indexOf(place);
+    const card=document.createElement('div');
+    card.className='place-card';
+    card.draggable=true;
+    card.dataset.idx=realIdx;
 
-    card.addEventListener('dragstart', function(e){
-      draggedPlaceIdx = realIdx;
+    card.addEventListener('dragstart',function(e){
+      draggedPlaceIdx=realIdx;
       card.classList.add('dragging');
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', realIdx);
+      e.dataTransfer.effectAllowed='move';
+      e.dataTransfer.setData('text/plain',realIdx);
     });
-    card.addEventListener('dragend', function(){
+    card.addEventListener('dragend',function(){
       card.classList.remove('dragging');
-      draggedPlaceIdx = null;
-      document.querySelectorAll('.day-block').forEach(function(b){ b.classList.remove('drag-over'); });
+      draggedPlaceIdx=null;
+      document.querySelectorAll('.day-block').forEach(function(b){b.classList.remove('drag-over');});
     });
 
-    const addrParts = [place.address,place.destination,place.province,place.country].filter(Boolean);
+    const addrParts=[place.address,place.destination,place.province,place.country].filter(Boolean);
 
-    const dragHint = document.createElement('div');
-    dragHint.className = 'place-drag-hint';
-    dragHint.textContent = '⠿';
+    const dragHint=document.createElement('div');
+    dragHint.className='place-drag-hint';
+    dragHint.textContent='⠿';
 
-    const typeEl = document.createElement('div');
-    typeEl.className = 'place-card-type';
-    typeEl.textContent = place.type || '📍 Other';
+    const typeEl=document.createElement('div');
+    typeEl.className='place-card-type';
+    typeEl.textContent=place.type||'📍 Other';
 
-    const nameEl = document.createElement('div');
-    nameEl.className = 'place-card-name';
-    nameEl.textContent = place.name || '';
+    const nameEl=document.createElement('div');
+    nameEl.className='place-card-name';
+    nameEl.textContent=place.name||'';
 
-    const actionsEl = document.createElement('div');
-    actionsEl.className = 'place-card-actions';
+    // Cost + address badges row
+    const metaEl=document.createElement('div');
+    metaEl.style.cssText='display:flex;gap:5px;flex-wrap:wrap;margin:3px 0';
+    if(place.cost){
+      const cb=document.createElement('span');
+      cb.className='cost-badge';
+      cb.textContent=place.cost;
+      metaEl.appendChild(cb);
+    }
 
-    const addBtn = document.createElement('button');
-    addBtn.className = 'btn-add-to-day';
-    addBtn.textContent = '+ Add to day';
-    addBtn.onclick = function(){ openDayPicker(realIdx); };
+    const actionsEl=document.createElement('div');
+    actionsEl.className='place-card-actions';
 
-    const editBtn = document.createElement('button');
-    editBtn.className = 'btn-place-edit';
-    editBtn.textContent = 'Edit';
-    editBtn.onclick = function(){ openEditPlaceModal(realIdx); };
+    const addBtn=document.createElement('button');
+    addBtn.className='btn-add-to-day';
+    addBtn.textContent='+ Add to day';
+    addBtn.onclick=function(){openDayPicker(realIdx);};
 
-    const delBtn = document.createElement('button');
-    delBtn.className = 'btn-place-del';
-    delBtn.textContent = '✕';
-    delBtn.onclick = function(){ deletePlace(realIdx); };
+    const editBtn=document.createElement('button');
+    editBtn.className='btn-place-edit';
+    editBtn.textContent='Edit';
+    editBtn.onclick=function(){openEditPlaceModal(realIdx);};
+
+    const delBtn=document.createElement('button');
+    delBtn.className='btn-place-del';
+    delBtn.textContent='✕';
+    delBtn.onclick=function(){deletePlace(realIdx);};
 
     actionsEl.appendChild(addBtn);
     actionsEl.appendChild(editBtn);
@@ -2555,24 +2534,22 @@ function renderPlaces(){
     card.appendChild(dragHint);
     card.appendChild(typeEl);
     card.appendChild(nameEl);
+    card.appendChild(metaEl);
     if(addrParts.length){
-      const addrEl = document.createElement('div');
-      addrEl.className = 'place-card-addr';
-      addrEl.textContent = '📍 ' + addrParts.join(', ');
+      const addrEl=document.createElement('div');
+      addrEl.className='place-card-addr';
+      addrEl.textContent='📍 '+addrParts.join(', ');
       card.appendChild(addrEl);
     }
     if(place.notes){
-      const notesEl = document.createElement('div');
-      notesEl.className = 'place-card-notes';
-      notesEl.textContent = place.notes;
+      const notesEl=document.createElement('div');
+      notesEl.className='place-card-notes';
+      notesEl.textContent=place.notes;
       card.appendChild(notesEl);
     }
     card.appendChild(actionsEl);
     carousel.appendChild(card);
   });
-
-  // Render the map below — async, doesn't block card rendering
-  renderPlacesMap();
 }
 
 
@@ -2595,6 +2572,7 @@ function confirmAddPlace(){
     address: (document.getElementById('pp-addr').value||'').trim(),
     province: (document.getElementById('pp-province').value||'').trim(),
     country: (document.getElementById('pp-country').value||'').trim(),
+    cost: document.getElementById('pp-cost').value||'',
     notes: (document.getElementById('pp-notes').value||'').trim()
   });
   ['pp-name','pp-dest','pp-addr','pp-province','pp-country','pp-notes'].forEach(function(id){
@@ -2700,6 +2678,7 @@ function openEditPlaceModal(idx){
   document.getElementById('es-province').value = p.province||'';
   document.getElementById('es-postal').value = p.postal||'';
   document.getElementById('es-country').value = p.country||'';
+  document.getElementById('es-cost').value = p.cost||'';
   document.getElementById('es-notes').value = p.notes||'';
   // Tag modal as editing a place so saveStopEdit routes correctly
   document.getElementById('edit-stop-modal').dataset.mode = 'place';
@@ -2796,5 +2775,6 @@ function toast(msg){
   }
 })();
 </script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 </body>
 </html>
