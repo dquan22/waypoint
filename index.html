@@ -371,10 +371,8 @@ input,select,textarea{font-family:'Outfit',sans-serif}
 .btn-show-map{padding:9px 20px;background:var(--ink);color:#fff;border:none;border-radius:var(--radius);font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:7px;transition:all .15s;font-family:'Outfit',sans-serif}
 .btn-show-map:hover{background:#2e2b25}
 .btn-show-map:disabled{background:var(--muted);cursor:not-allowed}
-/* ── LEAFLET INSIDE MAP SECTION ── */
-#places-leaflet-map{width:100%;height:100%;display:none}
+#places-map-canvas{display:none;border-radius:var(--radius-lg)}
 
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
 </style>
 </head>
 <body>
@@ -529,6 +527,7 @@ input,select,textarea{font-family:'Outfit',sans-serif}
         <div class="add-row add-row-2" style="margin-bottom:9px">
           <select class="add-input" id="pp-cost">
             <option value="">Cost (optional)</option>
+            <option value="Free">Free</option>
             <option value="$1 - $10">$1 - $10</option>
             <option value="$10 - $25">$10 - $25</option>
             <option value="$25 - $50">$25 - $50</option>
@@ -569,7 +568,7 @@ input,select,textarea{font-family:'Outfit',sans-serif}
               <div style="font-size:32px;margin-bottom:8px">🗺️</div>
               <div style="font-size:13px;color:var(--muted)">Click "Show on map" above.</div>
             </div>
-            <div id="places-leaflet-map" style="width:100%;height:100%;display:none"></div>
+            <canvas id="places-map-canvas" style="display:none;width:100%;height:100%"></canvas>
           </div>
         </div>
       </div>
@@ -664,6 +663,7 @@ input,select,textarea{font-family:'Outfit',sans-serif}
         <label>Cost</label>
         <select id="es-cost">
           <option value="">Not listed</option>
+          <option value="Free">Free</option>
           <option value="$1 - $10">$1 - $10</option>
           <option value="$10 - $25">$10 - $25</option>
           <option value="$25 - $50">$25 - $50</option>
@@ -1127,6 +1127,7 @@ function buildDayBlock(di){
           <input class="add-input" id="adur-${di}" placeholder="Duration (e.g. ~2 hours)" />
           <select class="add-input" id="acost-${di}">
             <option value="">Cost (optional)</option>
+            <option value="Free">Free</option>
             <option value="$1 - $10">$1 - $10</option>
             <option value="$10 - $25">$10 - $25</option>
             <option value="$25 - $50">$25 - $50</option>
@@ -2138,165 +2139,212 @@ function openDayRoute(di){
 }
 
 // ═══════════════════════════════════════════
-// PLACES MAP — Leaflet initialised on explicit button click only
-// Container is guaranteed visible at click time → no grey tile problem
+// PLACES MAP — canvas + OSM tiles, no external library
+// Triggered explicitly by button click so container is always visible
 // ═══════════════════════════════════════════
-let placesLeafletMap = null;
-let placesLeafletMarkers = [];
+
+// OSM tile maths
+function _tileXY(lat, lon, z){
+  var n = Math.pow(2, z);
+  var x = Math.floor((lon + 180) / 360 * n);
+  var lr = lat * Math.PI / 180;
+  var y = Math.floor((1 - Math.log(Math.tan(lr) + 1 / Math.cos(lr)) / Math.PI) / 2 * n);
+  return {x: x, y: y};
+}
+
+function _pixelPos(lat, lon, z, tileSize, originX, originY){
+  var n = Math.pow(2, z);
+  var px = (lon + 180) / 360 * n * tileSize - originX * tileSize;
+  var lr = lat * Math.PI / 180;
+  var py = (1 - Math.log(Math.tan(lr) + 1 / Math.cos(lr)) / Math.PI) / 2 * n * tileSize - originY * tileSize;
+  return {x: px, y: py};
+}
+
+function _chooseZoom(minLat, maxLat, minLon, maxLon, W, H){
+  var TILE = 256;
+  for(var z = 16; z >= 1; z--){
+    var t0 = _tileXY(maxLat, minLon, z);
+    var t1 = _tileXY(minLat, maxLon, z);
+    if((t1.x - t0.x + 1) * TILE <= W * 1.4 && (t1.y - t0.y + 1) * TILE <= H * 1.4) return z;
+  }
+  return 2;
+}
 
 function resetPlacesMap(){
-  // Called when filters change — hide the map so user must re-click Show on map
-  const wrap = document.getElementById('places-map-wrap');
+  var wrap = document.getElementById('places-map-wrap');
   if(wrap) wrap.style.display = 'none';
-  const btn = document.getElementById('btn-show-map');
+  var btn = document.getElementById('btn-show-map');
   if(btn){ btn.textContent = '🗺 Show on map'; btn.disabled = false; }
-  const statusEl = document.getElementById('places-map-status');
+  var statusEl = document.getElementById('places-map-status');
   if(statusEl) statusEl.textContent = '';
-  // Destroy existing Leaflet map so it reinitialises fresh next time
-  if(placesLeafletMap){
-    placesLeafletMap.remove();
-    placesLeafletMap = null;
-    placesLeafletMarkers = [];
-    const container = document.getElementById('places-leaflet-map');
-    if(container) container.innerHTML = '';
-  }
+  var canvas = document.getElementById('places-map-canvas');
+  if(canvas){ canvas.style.display = 'none'; }
+  var ph = document.getElementById('places-map-placeholder');
+  if(ph){ ph.style.display = 'flex'; ph.innerHTML = '<div style="font-size:32px;margin-bottom:8px">🗺️</div><div style="font-size:13px;color:var(--muted)">Click "Show on map" above.</div>'; }
 }
 
 async function triggerPlacesMap(){
-  if(!trip || !trip.places || !trip.places.length){
-    toast('Add some places first');
-    return;
-  }
+  if(!trip || !trip.places || !trip.places.length){ toast('Add some places first'); return; }
 
-  // Apply current filters to get the subset to map
-  const filtered = trip.places.filter(function(p){
+  var filtered = trip.places.filter(function(p){
     if(placeFilterType !== 'All' && (p.type||'📍 Other') !== placeFilterType) return false;
     if(placeFilterCity !== 'All' && (p.destination||'') !== placeFilterCity) return false;
     if(placeFilterCost !== 'All' && (p.cost||'') !== placeFilterCost) return false;
     return true;
   });
 
-  if(!filtered.length){
-    toast('No places match the current filters');
-    return;
-  }
+  if(!filtered.length){ toast('No places match the current filters'); return; }
 
-  const btn = document.getElementById('btn-show-map');
-  const statusEl = document.getElementById('places-map-status');
-  const wrap = document.getElementById('places-map-wrap');
-  const legend = document.getElementById('places-map-legend');
-  const placeholder = document.getElementById('places-map-placeholder');
-  const mapContainer = document.getElementById('places-leaflet-map');
+  var btn     = document.getElementById('btn-show-map');
+  var statusEl= document.getElementById('places-map-status');
+  var wrap    = document.getElementById('places-map-wrap');
+  var legend  = document.getElementById('places-map-legend');
+  var ph      = document.getElementById('places-map-placeholder');
+  var canvas  = document.getElementById('places-map-canvas');
 
-  if(btn){ btn.disabled = true; btn.textContent = '⏳ Locating places…'; }
+  if(btn){ btn.disabled = true; btn.textContent = '⏳ Locating…'; }
   if(wrap) wrap.style.display = 'grid';
+  if(ph)  { ph.style.display = 'flex'; ph.innerHTML = '<div style="font-size:13px;color:var(--muted)">Geocoding places…</div>'; }
+  if(canvas) canvas.style.display = 'none';
 
-  // Geocode with progress updates
-  const geocoded = [];
+  // ── Geocode with per-item progress ──
+  var geocoded = [];
   for(var i = 0; i < filtered.length; i++){
     if(statusEl) statusEl.textContent = 'Locating ' + (i+1) + ' of ' + filtered.length + '…';
     try{
-      const result = await geocodeStop(filtered[i]);
+      var result = await geocodeStop(filtered[i]);
       if(result && result.lat && result.lon){
         geocoded.push({place: filtered[i], idx: i, lat: result.lat, lon: result.lon});
       }
     }catch(e){ console.warn('Geocode failed:', filtered[i].name, e); }
-    if(i < filtered.length - 1){
-      await new Promise(function(r){ setTimeout(r, 1100); });
-    }
+    if(i < filtered.length - 1) await new Promise(function(r){ setTimeout(r, 1100); });
   }
 
-  const failCount = filtered.length - geocoded.length;
+  var failCount = filtered.length - geocoded.length;
   if(statusEl) statusEl.textContent = geocoded.length + ' of ' + filtered.length + ' located'
     + (failCount ? ' · ' + failCount + ' need location data' : ' ✓');
 
-  // Build legend
+  // ── Build legend ──
   if(legend){
     legend.innerHTML = '';
     filtered.forEach(function(p, i){
-      const found = geocoded.find(function(g){ return g.idx === i; });
-      const item = document.createElement('div');
+      var found = geocoded.find(function(g){ return g.idx === i; });
+      var item = document.createElement('div');
       item.className = 'places-map-legend-item';
-      const num = document.createElement('div');
+      var num = document.createElement('div');
       num.className = 'places-map-legend-num';
       num.style.background = found ? '#7c3aed' : 'var(--muted)';
       num.textContent = i + 1;
-      const info = document.createElement('div');
+      var info = document.createElement('div');
       info.className = 'places-map-legend-info';
-      const name = document.createElement('div');
+      var name = document.createElement('div');
       name.className = 'places-map-legend-name';
       name.textContent = p.name;
       name.style.opacity = found ? '1' : '0.45';
-      name.title = found ? '' : 'No location found — add city and country';
-      const sub = document.createElement('div');
+      name.title = found ? '' : 'Add city and country for location';
+      var sub = document.createElement('div');
       sub.className = 'places-map-legend-sub';
-      const subParts = [p.type, p.destination, p.cost].filter(Boolean);
-      sub.textContent = subParts.join(' · ');
-      info.appendChild(name);
-      info.appendChild(sub);
-      item.appendChild(num);
-      item.appendChild(info);
+      sub.textContent = [p.type, p.destination, p.cost].filter(Boolean).join(' · ');
+      info.appendChild(name); info.appendChild(sub);
+      item.appendChild(num); item.appendChild(info);
       legend.appendChild(item);
     });
   }
 
   if(!geocoded.length){
-    if(placeholder){
-      placeholder.style.display = 'flex';
-      placeholder.innerHTML = '<div style="font-size:13px;color:var(--muted);text-align:center;padding:20px">'
-        + 'No places could be located.<br><span style="font-size:11px">Add city, province, and country to each place.</span></div>';
-    }
+    if(ph){ ph.style.display = 'flex'; ph.innerHTML = '<div style="font-size:13px;color:var(--muted);text-align:center;padding:20px">No places could be located.<br><span style="font-size:11px">Add city, province, and country to each place.</span></div>'; }
     if(btn){ btn.disabled = false; btn.textContent = '🗺 Show on map'; }
     return;
   }
 
-  // Render Leaflet map — container is visible right now, guaranteed
-  if(placeholder) placeholder.style.display = 'none';
-  if(mapContainer){ mapContainer.style.display = 'block'; mapContainer.innerHTML = ''; }
+  // ── Calculate bounding box ──
+  var lats = geocoded.map(function(g){ return g.lat; });
+  var lons = geocoded.map(function(g){ return g.lon; });
+  var minLat = Math.min.apply(null, lats), maxLat = Math.max.apply(null, lats);
+  var minLon = Math.min.apply(null, lons), maxLon = Math.max.apply(null, lons);
+  var pad = Math.max(0.012, Math.max(maxLat - minLat, maxLon - minLon) * 0.3);
+  minLat -= pad; maxLat += pad; minLon -= pad; maxLon += pad;
 
-  if(typeof L === 'undefined'){
-    if(placeholder){
-      placeholder.style.display = 'flex';
-      placeholder.innerHTML = '<div style="font-size:13px;color:var(--muted)">Map library not loaded. Check your internet connection.</div>';
+  // ── Size canvas to its container ──
+  var frame = canvas.parentElement;
+  var rect  = frame ? frame.getBoundingClientRect() : {width: 600, height: 440};
+  var W = Math.max(rect.width  || 600, 300);
+  var H = Math.max(rect.height || 440, 250);
+  canvas.width  = W;
+  canvas.height = H;
+
+  var ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#e8e0d8';
+  ctx.fillRect(0, 0, W, H);
+
+  var TILE = 256;
+  var zoom = _chooseZoom(minLat, maxLat, minLon, maxLon, W, H);
+  var origin = _tileXY(maxLat, minLon, zoom);
+  var end    = _tileXY(minLat, maxLon, zoom);
+
+  var numTilesW = end.x - origin.x + 1;
+  var numTilesH = end.y - origin.y + 1;
+  var offX = Math.round((W - numTilesW * TILE) / 2);
+  var offY = Math.round((H - numTilesH * TILE) / 2);
+
+  // ── Load tiles in parallel ──
+  var tileJobs = [];
+  var subs = ['a','b','c'];
+  for(var tx = origin.x; tx <= end.x; tx++){
+    for(var ty = origin.y; ty <= end.y; ty++){
+      (function(tx, ty){
+        var url = 'https://' + subs[(tx+ty)%3] + '.tile.openstreetmap.org/' + zoom + '/' + tx + '/' + ty + '.png';
+        var px = offX + (tx - origin.x) * TILE;
+        var py = offY + (ty - origin.y) * TILE;
+        tileJobs.push(new Promise(function(resolve){
+          var img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload  = function(){ ctx.drawImage(img, px, py, TILE, TILE); resolve(); };
+          img.onerror = function(){
+            ctx.fillStyle = '#ddd8d0'; ctx.fillRect(px, py, TILE, TILE);
+            ctx.strokeStyle = '#ccc'; ctx.strokeRect(px, py, TILE, TILE);
+            resolve();
+          };
+          img.src = url;
+        }));
+      })(tx, ty);
     }
-    if(btn){ btn.disabled = false; btn.textContent = '🗺 Show on map'; }
-    return;
   }
+  await Promise.all(tileJobs);
 
-  placesLeafletMap = L.map('places-leaflet-map', {zoomControl: true});
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>',
-    maxZoom: 19
-  }).addTo(placesLeafletMap);
-
-  const latlngs = [];
+  // ── Draw numbered markers (no connecting lines) ──
   geocoded.forEach(function(g, i){
-    const p = g.place || {};
-    const num = g.idx + 1;
-    const icon = L.divIcon({
-      html: '<div style="background:#7c3aed;color:#fff;width:26px;height:26px;border-radius:50%;'
-        + 'display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;'
-        + 'border:2.5px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.3);font-family:Outfit,sans-serif">'
-        + num + '</div>',
-      className: '', iconSize: [26,26], iconAnchor: [13,13]
-    });
-    const mk = L.marker([g.lat, g.lon], {icon: icon}).addTo(placesLeafletMap);
-    const parts = ['<strong>' + esc(p.name||'') + '</strong>'];
-    if(p.type) parts.push('<span style="font-size:11px;color:#555">' + esc(p.type) + '</span>');
-    if(p.cost) parts.push('<span style="font-size:11px;color:#92400e;font-weight:600">' + esc(p.cost) + '</span>');
-    if(p.address || p.destination) parts.push('<span style="font-size:11px;color:#059669">📍 '
-      + esc([p.address, p.destination].filter(Boolean).join(', ')) + '</span>');
-    mk.bindPopup(parts.join('<br>'));
-    placesLeafletMarkers.push(mk);
-    latlngs.push([g.lat, g.lon]);
+    var pix = _pixelPos(g.lat, g.lon, zoom, TILE, origin.x, origin.y);
+    var px = offX + pix.x;
+    var py = offY + pix.y;
+    var num = g.idx + 1;
+    var R = 13;
+
+    // Shadow
+    ctx.beginPath(); ctx.arc(px, py + 2, R + 1, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.2)'; ctx.fill();
+
+    // Circle
+    ctx.beginPath(); ctx.arc(px, py, R, 0, Math.PI * 2);
+    ctx.fillStyle = '#7c3aed'; ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5; ctx.stroke(); ctx.lineWidth = 1;
+
+    // Number
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 11px Outfit,Arial,sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(String(num), px, py);
   });
 
-  if(latlngs.length === 1){
-    placesLeafletMap.setView(latlngs[0], 15);
-  } else {
-    placesLeafletMap.fitBounds(L.latLngBounds(latlngs), {padding: [40, 40]});
-  }
+  // ── OSM attribution ──
+  ctx.fillStyle = 'rgba(255,255,255,0.8)';
+  ctx.fillRect(W - 164, H - 18, 164, 18);
+  ctx.fillStyle = '#555'; ctx.font = '10px Arial,sans-serif';
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  ctx.fillText('© OpenStreetMap contributors', W - 4, H - 9);
 
+  if(ph) ph.style.display = 'none';
+  canvas.style.display = 'block';
   if(btn){ btn.disabled = false; btn.textContent = '↻ Refresh map'; }
 }
 
@@ -2440,7 +2488,7 @@ function renderPlaces(){
 
   const types=[...new Set(places.map(function(p){return p.type||'📍 Other';}))].sort();
   const cities=[...new Set(places.map(function(p){return p.destination||'';}).filter(Boolean))].sort();
-  const costs=['$1 - $10','$10 - $25','$25 - $50','$50+'].filter(function(c){
+  const costs=['Free','$1 - $10','$10 - $25','$25 - $50','$50+'].filter(function(c){
     return places.some(function(p){return p.cost===c;});
   });
 
@@ -2775,6 +2823,5 @@ function toast(msg){
   }
 })();
 </script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 </body>
 </html>
